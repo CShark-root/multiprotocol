@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -34,16 +35,20 @@ func EnsureSelfSigned(certPath, keyPath string) (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	now := time.Now()
+	ips := localIPs()
 	tmpl := x509.Certificate{
 		SerialNumber: serial,
-		// Empty subject on purpose: a CN like "panel" would be a fingerprint.
+		// The server's own IP as CN, like any generic self-signed cert: a name
+		// such as "panel" would be a fingerprint, and an empty subject breaks
+		// OpenSSL-based clients ("couldn't get X509-issuer name").
+		Subject:               pkix.Name{CommonName: commonName(ips)},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		DNSNames:              []string{"localhost"},
-		IPAddresses:           localIPs(),
+		IPAddresses:           ips,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, key.Public(), key)
 	if err != nil {
@@ -98,6 +103,15 @@ func localIPs() []net.IP {
 		}
 	}
 	return ips
+}
+
+func commonName(ips []net.IP) string {
+	for _, ip := range ips {
+		if !ip.IsLoopback() && ip.To4() != nil {
+			return ip.String()
+		}
+	}
+	return "localhost"
 }
 
 func fileExists(path string) bool {

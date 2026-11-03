@@ -23,6 +23,12 @@ systemctl daemon-reload
 systemctl enable panel >/dev/null 2>&1
 systemctl restart panel
 sleep 2
+# Optional: the address clients use, when auto-detection would pick the wrong one.
+if [[ -n "${PUBLIC_HOST:-}" ]]; then
+  sudo -u panel /usr/local/bin/panel set-host -data-dir /var/lib/panel "$PUBLIC_HOST"
+  systemctl restart panel
+  sleep 2
+fi
 systemctl --no-pager --lines=5 status panel || true
 echo
 sudo -u panel /usr/local/bin/panel show-url -data-dir /var/lib/panel

@@ -42,7 +42,13 @@ type Config struct {
 	PublicHost string `json:"publicHost"`
 }
 
-var basePathRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+var (
+	basePathRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+	hostnameRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+)
+
+// ValidHost reports whether h is an IP address or a domain name.
+func ValidHost(h string) bool { return net.ParseIP(h) != nil || hostnameRe.MatchString(h) }
 
 func ValidBasePath(p string) bool { return basePathRe.MatchString(p) }
 
@@ -56,8 +62,8 @@ func (c Config) Validate() error {
 	if !ValidBasePath(c.SubPath) || c.SubPath == c.BasePath {
 		return errors.New("subPath: 8-64 characters of A-Z, a-z, 0-9, '_' or '-', different from basePath")
 	}
-	if c.PublicHost == "" {
-		return errors.New("publicHost: required")
+	if !ValidHost(c.PublicHost) {
+		return errors.New("publicHost: an IP address or a domain name")
 	}
 	switch c.Decoy {
 	case DecoyNotFound, DecoyDrop:

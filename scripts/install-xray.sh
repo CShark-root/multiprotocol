@@ -21,7 +21,10 @@ for cmd in curl unzip sha256sum; do
 done
 
 if [[ -z "$TAG" ]]; then
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  # Read the whole response first: piping into `grep -m1` would close the
+  # pipe early and make curl fail under pipefail.
+  RELEASE=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+  TAG=$(printf '%s\n' "$RELEASE" | grep '"tag_name"' | head -n1 | cut -d'"' -f4)
 fi
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected tag: '$TAG'" >&2; exit 1; }
 

@@ -1,0 +1,7 @@
+#cloud-config
+# Minimal first-boot setup for the Multipass test VM (scripts/vm/create-vm-multipass.ps1).
+package_update: true
+packages:
+  - unzip
+  - curl
+timezone: Europe/Moscow

@@ -44,6 +44,8 @@ func main() {
 			return
 		case "show-url":
 			os.Exit(showURL(os.Args[2:]))
+		case "set-host":
+			os.Exit(setHost(os.Args[2:]))
 		}
 	}
 	os.Exit(serve(os.Args[1:]))
@@ -235,12 +237,38 @@ func showURL(args []string) int {
 	return 0
 }
 
+// setHost changes the address clients connect to (used in share links), for
+// servers whose public IP is not on an interface or that sit behind NAT.
+// The running panel picks it up after a restart.
+func setHost(args []string) int {
+	fsFlags := flag.NewFlagSet("set-host", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "data", "panel data directory")
+	fsFlags.Parse(args)
+	if fsFlags.NArg() != 1 || !config.ValidHost(fsFlags.Arg(0)) {
+		fmt.Fprintln(os.Stderr, "usage: panel set-host [-data-dir DIR] <ip-or-domain>")
+		return 2
+	}
+	cfg, _, err := config.LoadOrCreate(*dataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	cfg.PublicHost = fsFlags.Arg(0)
+	if err := config.Save(*dataDir, cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println("public host set to", cfg.PublicHost, "- restart the panel to apply")
+	return 0
+}
+
 func printURLs(w *os.File, cfg config.Config, fingerprint string) {
 	host, port, _ := net.SplitHostPort(cfg.Listen)
 	var hosts []string
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		hosts = append(hosts, cfg.PublicHost)
 		for _, ip := range tlsutil.LocalIPs() {
-			if !ip.IsLoopback() {
+			if !ip.IsLoopback() && ip.String() != cfg.PublicHost {
 				hosts = append(hosts, ip.String())
 			}
 		}
