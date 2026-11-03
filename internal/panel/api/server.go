@@ -22,13 +22,17 @@ import (
 )
 
 type Deps struct {
-	BasePath string // secret path segment, without slashes
-	Auth     *auth.Service
-	Users    *service.Users
-	Agent    *agent.Agent // nil when the panel runs without a local agent
-	Web      fs.FS        // built frontend (web/dist)
-	Logger   *slog.Logger
-	TLS      bool // served over HTTPS: Secure cookies and HSTS
+	BasePath   string // secret path segment, without slashes
+	Auth       *auth.Service
+	Users      *service.Users
+	Inbounds   *service.Inbounds
+	Syncer     *service.Syncer // nil without a local agent
+	Agent      *agent.Agent    // nil when the panel runs without a local agent
+	Web        fs.FS           // built frontend (web/dist)
+	Logger     *slog.Logger
+	TLS        bool   // served over HTTPS: Secure cookies and HSTS
+	PublicHost string // host clients connect to, for share links
+	SubBaseURL string // e.g. https://203.0.113.5:41582/<subPath>/
 }
 
 type server struct {
@@ -71,6 +75,15 @@ func New(d Deps) http.Handler {
 					r.Get("/{id}", s.getUser)
 					r.Put("/{id}", s.updateUser)
 					r.Delete("/{id}", s.deleteUser)
+					r.Get("/{id}/links", s.userLinks)
+				})
+				r.Route("/inbounds", func(r chi.Router) {
+					r.Get("/", s.listInbounds)
+					r.Post("/", s.createInbound)
+					r.Get("/suggest", s.suggestInbound)
+					r.Get("/{id}", s.getInbound)
+					r.Put("/{id}", s.updateInbound)
+					r.Delete("/{id}", s.deleteInbound)
 				})
 			})
 		})

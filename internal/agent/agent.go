@@ -5,6 +5,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"time"
@@ -19,6 +21,39 @@ func New(adapters ...Adapter) *Agent {
 	return &Agent{adapters: adapters, started: time.Now()}
 }
 
+// Apply pushes the desired state to every core. Cores are independent: one
+// failing does not stop the others from being updated.
+func (a *Agent) Apply(ctx context.Context, st NodeState) error {
+	var errs []error
+	for _, ad := range a.adapters {
+		if err := ad.Apply(ctx, st.Configs[ad.Name()]); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", ad.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Traffic collects per-user deltas from all cores.
+func (a *Agent) Traffic(ctx context.Context) ([]TrafficDelta, error) {
+	var all []TrafficDelta
+	var errs []error
+	for _, ad := range a.adapters {
+		d, err := ad.Traffic(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", ad.Name(), err))
+			continue
+		}
+		all = append(all, d...)
+	}
+	return all, errors.Join(errs...)
+}
+
+func (a *Agent) Stop() {
+	for _, ad := range a.adapters {
+		ad.Stop()
+	}
+}
+
 type NodeHealth struct {
 	Hostname           string       `json:"hostname"`
 	OS                 string       `json:"os"`
@@ -29,7 +64,7 @@ type NodeHealth struct {
 }
 
 type CoreHealth struct {
-	Protocol string `json:"protocol"`
+	Name string `json:"name"`
 	HealthStatus
 }
 
@@ -44,7 +79,7 @@ func (a *Agent) Health(ctx context.Context) NodeHealth {
 		Cores:              []CoreHealth{},
 	}
 	for _, ad := range a.adapters {
-		h.Cores = append(h.Cores, CoreHealth{Protocol: ad.Protocol(), HealthStatus: ad.Health(ctx)})
+		h.Cores = append(h.Cores, CoreHealth{Name: ad.Name(), HealthStatus: ad.Health(ctx)})
 	}
 	return h
 }

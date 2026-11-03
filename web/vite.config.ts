@@ -14,5 +14,6 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     proxy: { '/dev/api': 'http://127.0.0.1:8080' },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  // One ~160 kB (gzip) bundle is fine for an admin panel loaded once.
+  build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 800 },
 }))

@@ -32,9 +32,14 @@ const (
 type Config struct {
 	Listen   string    `json:"listen"`
 	BasePath string    `json:"basePath"`
+	SubPath  string    `json:"subPath"`           // secret prefix of subscription links, different from basePath
 	TLSCert  string    `json:"tlsCert,omitempty"` // empty: self-signed pair in <data>/tls
 	TLSKey   string    `json:"tlsKey,omitempty"`
 	Decoy    DecoyMode `json:"decoy"`
+	// PublicHost is the address clients connect to (IP or domain), used in
+	// share links. Detected on first start; edit it if the server sits
+	// behind NAT.
+	PublicHost string `json:"publicHost"`
 }
 
 var basePathRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
@@ -48,6 +53,12 @@ func (c Config) Validate() error {
 	if !ValidBasePath(c.BasePath) {
 		return errors.New("basePath: 8-64 characters of A-Z, a-z, 0-9, '_' or '-'")
 	}
+	if !ValidBasePath(c.SubPath) || c.SubPath == c.BasePath {
+		return errors.New("subPath: 8-64 characters of A-Z, a-z, 0-9, '_' or '-', different from basePath")
+	}
+	if c.PublicHost == "" {
+		return errors.New("publicHost: required")
+	}
 	switch c.Decoy {
 	case DecoyNotFound, DecoyDrop:
 	default:
@@ -59,7 +70,8 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Load reads <dataDir>/panel.json.
+// Load reads <dataDir>/panel.json, filling in and saving fields added by
+// newer versions.
 func Load(dataDir string) (Config, error) {
 	path := filepath.Join(dataDir, FileName)
 	var cfg Config
@@ -70,10 +82,48 @@ func Load(dataDir string) (Config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if cfg.fillDefaults() {
+		if err := Save(dataDir, cfg); err != nil {
+			return cfg, err
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+func (c *Config) fillDefaults() (changed bool) {
+	if c.SubPath == "" {
+		c.SubPath, changed = RandomBasePath(), true
+	}
+	if c.PublicHost == "" {
+		c.PublicHost, changed = DetectPublicHost(), true
+	}
+	return changed
+}
+
+// DetectPublicHost picks the first public IPv4 of this machine, falling back
+// to any non-loopback address (a VM behind NAT gets its LAN address).
+func DetectPublicHost() string {
+	addrs, _ := net.InterfaceAddrs()
+	var fallback string
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() || ipnet.IP.IsLinkLocalUnicast() || ipnet.IP.To4() == nil {
+			continue
+		}
+		if !ipnet.IP.IsPrivate() {
+			return ipnet.IP.String()
+		}
+		if fallback == "" {
+			fallback = ipnet.IP.String()
+		}
+	}
+	if fallback == "" {
+		fallback = "127.0.0.1"
+	}
+	return fallback
 }
 
 // LoadOrCreate reads <dataDir>/panel.json, creating it with fresh random
@@ -92,6 +142,7 @@ func LoadOrCreate(dataDir string) (cfg Config, created bool, err error) {
 		BasePath: RandomBasePath(),
 		Decoy:    DecoyNotFound,
 	}
+	cfg.fillDefaults()
 	if err := Save(dataDir, cfg); err != nil {
 		return cfg, false, err
 	}

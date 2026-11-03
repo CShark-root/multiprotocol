@@ -18,7 +18,7 @@ const base = "S3cretPath_abc123"
 
 func gated(mode config.DecoyMode) http.Handler {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "panel") })
-	return Gate(base, mode, ok)
+	return Gate(mode, map[string]http.Handler{base: ok})
 }
 
 func TestGateNotFoundMode(t *testing.T) {

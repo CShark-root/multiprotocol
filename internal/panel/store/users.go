@@ -16,6 +16,7 @@ type User struct {
 	ResetPeriod  string
 	ExpireAt     *time.Time // nil = never
 	SubToken     string
+	UUID         string // VLESS credential
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -31,7 +32,7 @@ type UserFields struct {
 }
 
 const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, reset_period,
-	expire_at, sub_token, created_at, updated_at`
+	expire_at, sub_token, uuid, created_at, updated_at`
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY id`)
@@ -55,11 +56,31 @@ func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
 	return u, notFound(err)
 }
 
-func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken string, now time.Time) (User, error) {
+func (s *Store) GetUserBySubToken(ctx context.Context, token string) (User, error) {
+	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE sub_token = ?`, token))
+	return u, notFound(err)
+}
+
+// AddTraffic adds bytes to each user's counter in one transaction.
+func (s *Store) AddTraffic(ctx context.Context, byUser map[int64]int64, now time.Time) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		for id, bytes := range byUser {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE users SET traffic_used = traffic_used + ?, updated_at = ? WHERE id = ?`,
+				bytes, now.Unix(), id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid string, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users
-		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, now.Unix(), now.Unix())
+		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, uuid,
+		now.Unix(), now.Unix())
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -112,7 +133,7 @@ func scanUser(row scanner) (User, error) {
 	var enabled, created, updated int64
 	var expire sql.NullInt64
 	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.ResetPeriod,
-		&expire, &u.SubToken, &created, &updated)
+		&expire, &u.SubToken, &u.UUID, &created, &updated)
 	if err != nil {
 		return User{}, err
 	}

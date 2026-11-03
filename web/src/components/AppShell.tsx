@@ -29,7 +29,7 @@ type NavItem = { to: string; key: string; icon: ComponentType<{ className?: stri
 const nav: NavItem[] = [
   { to: '/', key: 'dashboard', icon: Gauge },
   { to: '/users', key: 'users', icon: Users },
-  { to: '/inbounds', key: 'inbounds', icon: Cable, soon: true },
+  { to: '/inbounds', key: 'inbounds', icon: Cable },
   { to: '/nodes', key: 'nodes', icon: Server, soon: true },
   { to: '/routing', key: 'routing', icon: RouteIcon, soon: true },
   { to: '/logs', key: 'logs', icon: Activity, soon: true },

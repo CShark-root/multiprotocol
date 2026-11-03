@@ -72,10 +72,61 @@ export type UserInput = {
   expireAt: string | null
 }
 
-export type CoreHealth = { protocol: string; running: boolean; version: string; message?: string }
+export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
+
+export type Transport = 'xhttp' | 'tcp' | 'grpc'
+
+export type Inbound = {
+  id: number
+  remark: string
+  protocol: string
+  transport: Transport
+  security: string
+  port: number
+  address: string
+  enabled: boolean
+  target: string
+  serverName: string
+  fingerprint: string
+  publicKey: string
+  shortId: string
+  xhttpPath?: string
+  xhttpMode?: string
+  grpcServiceName?: string
+  createdAt: string
+}
+
+export type InboundInput = {
+  remark: string
+  transport: Transport
+  port: number
+  address: string
+  target: string
+  serverName: string
+  fingerprint: string
+  xhttpPath: string
+  xhttpMode: string
+  grpcServiceName: string
+  enabled: boolean
+}
+
+export type InboundSuggest = {
+  port: number
+  targets: string[]
+  fingerprints: string[]
+  xhttpModes: string[]
+  publicHost: string
+}
+
+export type UserLinks = {
+  subscriptionUrl: string
+  links: { inboundId: number; remark: string; transport: Transport; url: string }[]
+}
 
 export type SystemInfo = {
   version: string
+  publicHost: string
+  sync: { lastSync: string | null; lastError: string } | null
   localAgent: {
     hostname: string
     os: string
@@ -107,5 +158,13 @@ export const api = {
     create: (input: UserInput) => request<User>('POST', 'users', input),
     update: (id: number, input: UserInput) => request<User>('PUT', `users/${id}`, input),
     remove: (id: number) => request<void>('DELETE', `users/${id}`),
+    links: (id: number) => request<UserLinks>('GET', `users/${id}/links`),
+  },
+  inbounds: {
+    list: () => request<Inbound[]>('GET', 'inbounds'),
+    suggest: () => request<InboundSuggest>('GET', 'inbounds/suggest'),
+    create: (input: InboundInput) => request<Inbound>('POST', 'inbounds', input),
+    update: (id: number, input: InboundInput) => request<Inbound>('PUT', `inbounds/${id}`, input),
+    remove: (id: number) => request<void>('DELETE', `inbounds/${id}`),
   },
 }

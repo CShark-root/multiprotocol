@@ -1,10 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Search, Trash2, UserPlus } from 'lucide-react'
+import { Pencil, Plus, Search, Smartphone, Trash2, UserPlus } from 'lucide-react'
 import { ApiError, api, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
 import { GiB, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
+import { ShareRow } from '@/components/share'
 
 const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'> = {
   active: 'success',
@@ -26,6 +27,7 @@ export function UsersPage() {
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<User | 'new' | null>(null)
   const [deleting, setDeleting] = useState<User | null>(null)
+  const [connecting, setConnecting] = useState<User | null>(null)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
   const toggle = useMutation({
@@ -117,6 +119,9 @@ export function UsersPage() {
                               disabled={toggle.isPending}
                               onChange={() => toggle.mutate(u)}
                             />
+                            <Button variant="ghost" size="icon" aria-label={t('users.connect')} title={t('users.connect')} onClick={() => setConnecting(u)}>
+                              <Smartphone className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" aria-label={t('common.edit')} title={t('common.edit')} onClick={() => setEditing(u)}>
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -136,6 +141,7 @@ export function UsersPage() {
       </Card>
 
       {editing && <UserDialog user={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={invalidate} />}
+      {connecting && <ConnectDialog user={connecting} onClose={() => setConnecting(null)} />}
 
       <Dialog
         open={deleting !== null}
@@ -153,6 +159,46 @@ export function UsersPage() {
         </div>
       </Dialog>
     </>
+  )
+}
+
+function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
+  const { t } = useTranslation()
+  const links = useQuery({ queryKey: ['users', user.id, 'links'], queryFn: () => api.users.links(user.id) })
+  return (
+    <Dialog open onClose={onClose} title={t('connect.title', { name: user.name })}>
+      {links.isPending ? (
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+      ) : links.isError ? (
+        <p className="text-sm text-destructive">{t('common.error')}</p>
+      ) : (
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          {user.status !== 'active' && (
+            <p className="rounded-xl bg-warning-soft px-3.5 py-2.5 text-sm text-warning">{t('connect.disabledUser')}</p>
+          )}
+          <ShareRow label={t('connect.subscription')} hint={t('connect.subscriptionHint')} text={links.data.subscriptionUrl} />
+          <div>
+            <div className="text-sm font-medium">{t('connect.links')}</div>
+            <p className="mb-2 text-xs text-muted-foreground">{t('connect.linksHint')}</p>
+            {links.data.links.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('connect.noLinks')}</p>
+            ) : (
+              <div className="space-y-2">
+                {links.data.links.map((l) => {
+                  const kind = t(`inbounds.transports.${l.transport}.title`)
+                  return <ShareRow key={l.inboundId} label={l.remark === kind ? kind : `${l.remark} · ${kind}`} text={l.url} />
+                })}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={onClose}>
+              OK
+            </Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
   )
 }
 

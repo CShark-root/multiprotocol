@@ -1,49 +1,36 @@
 package agent
 
-import (
-	"context"
-	"encoding/json"
-)
+import "context"
 
-// Adapter drives one VPN core on the node (Xray, Hysteria2, ...). Apply must
-// be idempotent: the agent always passes the full desired state.
+// Adapter drives one VPN core on the node (Xray, Hysteria2, sing-box). The
+// panel compiles the final config; the adapter validates, applies and
+// supervises it.
 type Adapter interface {
-	Protocol() string
-	Apply(ctx context.Context, inbounds []Inbound, users []UserAccess) error
-	Traffic(ctx context.Context) ([]TrafficDelta, error) // deltas since the previous call
-	Online(ctx context.Context) ([]OnlineEntry, error)
+	Name() string
+	// Apply makes the core run config. It is idempotent; a nil config stops
+	// the core. On failure the previous working config stays active.
+	Apply(ctx context.Context, config []byte) error
+	// Traffic returns per-user byte counts since the previous call.
+	Traffic(ctx context.Context) ([]TrafficDelta, error)
 	Health(ctx context.Context) HealthStatus
-}
-
-type Inbound struct {
-	Tag      string          `json:"tag"`
-	Protocol string          `json:"protocol"`
-	Port     int             `json:"port"`
-	Settings json.RawMessage `json:"settings"`
-}
-
-type UserAccess struct {
-	UserID      int64           `json:"userId"`
-	Email       string          `json:"email"` // stable per-user tag used for stats
-	InboundTag  string          `json:"inboundTag"`
-	Credentials json.RawMessage `json:"credentials"`
+	Stop()
 }
 
 type TrafficDelta struct {
-	UserID     int64  `json:"userId"`
-	InboundTag string `json:"inboundTag"`
-	Up         int64  `json:"up"`
-	Down       int64  `json:"down"`
-}
-
-type OnlineEntry struct {
-	UserID     int64  `json:"userId"`
-	InboundTag string `json:"inboundTag"`
-	IP         string `json:"ip"`
+	Email string `json:"email"`
+	Up    int64  `json:"up"`
+	Down  int64  `json:"down"`
 }
 
 type HealthStatus struct {
-	Running bool   `json:"running"`
-	Version string `json:"version"`
-	Message string `json:"message,omitempty"`
+	Installed bool   `json:"installed"`
+	Running   bool   `json:"running"`
+	Version   string `json:"version"`
+	Message   string `json:"message,omitempty"` // last error, human readable
+}
+
+// NodeState is the full desired state of a node: one config per core,
+// keyed by Adapter.Name. A missing entry stops that core.
+type NodeState struct {
+	Configs map[string][]byte
 }

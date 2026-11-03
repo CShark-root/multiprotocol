@@ -3,8 +3,10 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -16,16 +18,22 @@ import (
 	"panel/internal/agent"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
+	"panel/internal/panel/config"
 	"panel/internal/panel/service"
+	"panel/internal/panel/stealth"
 	"panel/internal/panel/store"
 )
 
-const base = "TestBasePath123"
+const (
+	base    = "TestBasePath123"
+	subPath = "TestSubPath456"
+)
 
 type client struct {
-	t    *testing.T
-	url  string
-	http *http.Client
+	t      *testing.T
+	url    string // panel prefix
+	server string // server root
+	http   *http.Client
 }
 
 func newClient(t *testing.T) *client {
@@ -39,17 +47,97 @@ func newClient(t *testing.T) *client {
 	h := api.New(api.Deps{
 		BasePath: base,
 		Auth:     auth.NewService(st),
-		Users:    service.NewUsers(st),
+		Users:    service.NewUsers(st, nil),
+		Inbounds: service.NewInbounds(st, nil, 1),
 		Agent:    agent.New(),
 		Web: fstest.MapFS{
-			"index.html":       {Data: []byte("<html><head><title>x</title></head></html>")},
+			"index.html":      {Data: []byte("<html><head><title>x</title></head></html>")},
 			"assets/app-1.js": {Data: []byte("console.log(1)")},
 		},
+		PublicHost: "203.0.113.5",
+		SubBaseURL: "https://203.0.113.5:4000/" + subPath + "/",
 	})
-	srv := httptest.NewServer(h)
+	sub := api.NewSubscription(api.SubscriptionDeps{SubPath: subPath, Store: st, PublicHost: "203.0.113.5", Decoy: config.DecoyNotFound})
+	srv := httptest.NewServer(stealth.Gate(config.DecoyNotFound, map[string]http.Handler{base: h, subPath: sub}))
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &client{t: t, url: srv.URL + "/" + base, http: &http.Client{Jar: jar}}
+	return &client{t: t, url: srv.URL + "/" + base, server: srv.URL, http: &http.Client{Jar: jar}}
+}
+
+// freePort returns a TCP port that is free right now.
+func freePort(t *testing.T) int {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+func TestInboundsAndSubscription(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+
+	port := freePort(t)
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "x", "transport": "quic", "port": port, "target": "www.microsoft.com"})
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "x", "transport": "xhttp", "port": port, "target": "not a host"})
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "x", "transport": "xhttp", "port": 1, "target": "www.microsoft.com"})
+
+	ib := c.expect(201, "POST", "/api/inbounds", map[string]any{"remark": "Основной", "transport": "xhttp", "port": port, "target": "www.microsoft.com"})
+	if ib["publicKey"] == "" || ib["shortId"] == "" || ib["xhttpPath"] == "" || ib["serverName"] != "www.microsoft.com" || ib["target"] != "www.microsoft.com:443" {
+		t.Fatalf("defaults not filled: %v", ib)
+	}
+	if _, leaked := ib["privateKey"]; leaked {
+		t.Fatal("private key must never be returned")
+	}
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "dup", "transport": "tcp", "port": port, "target": "www.microsoft.com"})
+
+	ibPath := "/api/inbounds/" + itoa(int(ib["id"].(float64)))
+	upd := c.expect(200, "PUT", ibPath, map[string]any{"remark": "Main", "transport": "xhttp", "port": port, "target": "www.apple.com", "xhttpPath": ib["xhttpPath"]})
+	if upd["publicKey"] != ib["publicKey"] || upd["serverName"] != "www.apple.com" {
+		t.Fatalf("keys must survive updates: %v", upd)
+	}
+
+	u := c.expect(201, "POST", "/api/users", map[string]any{"name": "phone"})
+	links := c.expect(200, "GET", "/api/users/"+itoa(int(u["id"].(float64)))+"/links", nil)
+	list := links["links"].([]any)
+	if len(list) != 1 || !strings.HasPrefix(list[0].(map[string]any)["url"].(string), "vless://") {
+		t.Fatalf("unexpected links: %v", links)
+	}
+	subURL := links["subscriptionUrl"].(string)
+	if !strings.HasPrefix(subURL, "https://203.0.113.5:4000/"+subPath+"/") {
+		t.Fatalf("bad subscription url %q", subURL)
+	}
+	token := subURL[strings.LastIndex(subURL, "/")+1:]
+
+	resp, err := http.Get(c.server + "/" + subPath + "/" + token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	decoded, err := base64.StdEncoding.DecodeString(string(body))
+	if resp.StatusCode != 200 || err != nil || !strings.Contains(string(decoded), "type=xhttp") {
+		t.Fatalf("subscription: %d %q (%v)", resp.StatusCode, decoded, err)
+	}
+	if resp.Header.Get("Subscription-Userinfo") == "" {
+		t.Fatal("missing subscription-userinfo header")
+	}
+	for _, bad := range []string{"/" + subPath + "/AAAAAAAAAAAAAAAAAAAAAAAAAA", "/" + subPath + "/x", "/" + subPath + "/"} {
+		resp, err := http.Get(c.server + bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Fatalf("%s: unknown tokens must look like any other miss, got %d", bad, resp.StatusCode)
+		}
+	}
+
+	c.expect(204, "DELETE", ibPath, nil)
+	if l := c.expect(200, "GET", "/api/users/"+itoa(int(u["id"].(float64)))+"/links", nil); len(l["links"].([]any)) != 0 {
+		t.Fatalf("links must disappear with the inbound: %v", l)
+	}
 }
 
 func (c *client) do(method, path, contentType string, body any) (int, []byte) {

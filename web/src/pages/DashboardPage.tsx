@@ -67,14 +67,32 @@ export function DashboardPage() {
         <Card>
           <h2 className="font-semibold">{t('dashboard.cores')}</h2>
           {agent && agent.cores.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {agent.cores.map((c) => (
-                <li key={c.protocol} className="flex items-center justify-between text-sm">
-                  <span>{c.protocol}</span>
-                  <Badge tone={c.running ? 'success' : 'danger'}>{c.version}</Badge>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="mt-4 space-y-2.5">
+                {agent.cores.map((c) => (
+                  <li key={c.name} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium capitalize">
+                      {c.name}
+                      {c.version && <span className="ml-1.5 font-normal text-muted-foreground">{c.version}</span>}
+                    </span>
+                    {!c.installed ? (
+                      <Badge tone="warning">{t('dashboard.coreMissing')}</Badge>
+                    ) : c.running ? (
+                      <Badge tone="success">{t('dashboard.coreRunning')}</Badge>
+                    ) : c.message ? (
+                      <Badge tone="danger">{t('dashboard.coreStopped')}</Badge>
+                    ) : (
+                      <Badge tone="muted">{t('dashboard.coreIdle')}</Badge>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {system.data?.sync?.lastSync && (
+                <p className="mt-4 text-xs text-muted-foreground">
+                  {t('dashboard.lastSync', { time: new Date(system.data.sync.lastSync).toLocaleTimeString(lng) })}
+                </p>
+              )}
+            </>
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">{t('dashboard.coresEmpty')}</p>
           )}

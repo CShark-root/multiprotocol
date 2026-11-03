@@ -4,10 +4,9 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"log/slog"
+	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -86,30 +85,47 @@ func (in UserInput) normalize() (store.UserFields, error) {
 }
 
 type Users struct {
-	store *store.Store
-	now   func() time.Time
+	store   *store.Store
+	now     func() time.Time
+	changed func() // asks the syncer to push the new state to the cores
 }
 
-func NewUsers(st *store.Store) *Users {
-	return &Users{store: st, now: time.Now}
+// NewUsers builds the service; changed may be nil.
+func NewUsers(st *store.Store, changed func()) *Users {
+	if changed == nil {
+		changed = func() {}
+	}
+	return &Users{store: st, now: time.Now, changed: changed}
+}
+
+// NewUUID returns a random version-4 UUID.
+func NewUUID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func (s *Users) Now() time.Time { return s.now() }
 
 func (s *Users) List(ctx context.Context) ([]store.User, error) { return s.store.ListUsers(ctx) }
 
-func (s *Users) Get(ctx context.Context, id int64) (store.User, error) { return s.store.GetUser(ctx, id) }
+func (s *Users) Get(ctx context.Context, id int64) (store.User, error) {
+	return s.store.GetUser(ctx, id)
+}
 
 func (s *Users) Create(ctx context.Context, adminID int64, in UserInput) (store.User, error) {
 	f, err := in.normalize()
 	if err != nil {
 		return store.User{}, err
 	}
-	u, err := s.store.CreateUser(ctx, f, rand.Text(), s.now())
+	u, err := s.store.CreateUser(ctx, f, rand.Text(), NewUUID(), s.now())
 	if err != nil {
 		return store.User{}, err
 	}
 	s.audit(ctx, adminID, "user.create", u.ID, f)
+	s.changed()
 	return u, nil
 }
 
@@ -123,6 +139,7 @@ func (s *Users) Update(ctx context.Context, adminID, id int64, in UserInput) (st
 		return store.User{}, err
 	}
 	s.audit(ctx, adminID, "user.update", id, f)
+	s.changed()
 	return u, nil
 }
 
@@ -131,20 +148,10 @@ func (s *Users) Delete(ctx context.Context, adminID, id int64) error {
 		return err
 	}
 	s.audit(ctx, adminID, "user.delete", id, nil)
+	s.changed()
 	return nil
 }
 
-// audit records the change; a failure here must not undo or hide a change
-// that already happened, so it is only logged.
 func (s *Users) audit(ctx context.Context, adminID int64, action string, userID int64, diff any) {
-	err := s.store.AddAudit(ctx, store.AuditEntry{
-		AdminID:    adminID,
-		Action:     action,
-		TargetType: "user",
-		TargetID:   strconv.FormatInt(userID, 10),
-		Diff:       diff,
-	}, s.now())
-	if err != nil {
-		slog.Warn("audit log write failed", "action", action, "err", err)
-	}
+	writeAudit(ctx, s.store, s.now(), adminID, action, "user", userID, diff)
 }

@@ -5,6 +5,7 @@ import { AppShell } from '@/components/AppShell'
 import { LoginPage, SetupPage } from '@/pages/AuthPages'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { UsersPage } from '@/pages/UsersPage'
+import { InboundsPage } from '@/pages/InboundsPage'
 import { ComingSoonPage, type SoonSection } from '@/pages/ComingSoonPage'
 
 export const queryClient = new QueryClient({
@@ -52,13 +53,14 @@ const appRoute = createRoute({
 
 const dashboardRoute = createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage })
 const usersRoute = createRoute({ getParentRoute: () => appRoute, path: '/users', component: UsersPage })
+const inboundsRoute = createRoute({ getParentRoute: () => appRoute, path: '/inbounds', component: InboundsPage })
 
-const soonSections: SoonSection[] = ['inbounds', 'nodes', 'routing', 'logs', 'amnezia', 'settings']
+const soonSections: SoonSection[] = ['nodes', 'routing', 'logs', 'amnezia', 'settings']
 const soonRoutes = soonSections.map((section) =>
   createRoute({ getParentRoute: () => appRoute, path: `/${section}`, component: () => <ComingSoonPage section={section} /> }),
 )
 
-const routeTree = rootRoute.addChildren([setupRoute, loginRoute, appRoute.addChildren([dashboardRoute, usersRoute, ...soonRoutes])])
+const routeTree = rootRoute.addChildren([setupRoute, loginRoute, appRoute.addChildren([dashboardRoute, usersRoute, inboundsRoute, ...soonRoutes])])
 
 export const router = createRouter({
   routeTree,

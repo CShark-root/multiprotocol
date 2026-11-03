@@ -18,10 +18,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/agent/xray"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
@@ -51,6 +54,8 @@ func serve(args []string) int {
 	dataDir := fsFlags.String("data-dir", "data", "directory for the database, config and TLS keys")
 	dev := fsFlags.Bool("dev", false, "development mode: plain HTTP on 127.0.0.1:8080 under /dev/")
 	noAgent := fsFlags.Bool("no-local-agent", false, "do not run the embedded agent (multi-node panel host)")
+	xrayBin := fsFlags.String("xray-bin", defaultXrayBin(), "path to the xray binary (geo .dat files next to it)")
+	xrayAPI := fsFlags.String("xray-api", "127.0.0.1:62789", "local address for the Xray stats API")
 	fsFlags.Parse(args)
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -81,20 +86,46 @@ func serve(args []string) int {
 
 	authSvc := auth.NewService(st)
 	var localAgent *agent.Agent
+	var syncer *service.Syncer
+	changed := func() {}
 	if !*noAgent {
-		localAgent = agent.New()
+		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), *xrayAPI, log)
+		localAgent = agent.New(xr)
+		defer localAgent.Stop()
+		syncer = service.NewSyncer(st, localAgent, *xrayAPI, log)
+		changed = syncer.Trigger
+		go syncer.Run(ctx)
 	}
+
+	_, portStr, _ := net.SplitHostPort(cfg.Listen)
+	panelPort, _ := strconv.Atoi(portStr)
+	scheme := "https"
+	if *dev {
+		scheme = "http"
+	}
+	subBase := fmt.Sprintf("%s://%s/%s/", scheme, net.JoinHostPort(cfg.PublicHost, portStr), cfg.SubPath)
+	if *dev {
+		subBase = fmt.Sprintf("http://%s/%s/", cfg.Listen, cfg.SubPath)
+	}
+
 	handler := api.New(api.Deps{
-		BasePath: cfg.BasePath,
-		Auth:     authSvc,
-		Users:    service.NewUsers(st),
-		Agent:    localAgent,
-		Web:      web.Files(),
-		Logger:   log,
-		TLS:      !*dev,
+		BasePath:   cfg.BasePath,
+		Auth:       authSvc,
+		Users:      service.NewUsers(st, changed),
+		Inbounds:   service.NewInbounds(st, changed, panelPort),
+		Syncer:     syncer,
+		Agent:      localAgent,
+		Web:        web.Files(),
+		Logger:     log,
+		TLS:        !*dev,
+		PublicHost: cfg.PublicHost,
+		SubBaseURL: subBase,
+	})
+	sub := api.NewSubscription(api.SubscriptionDeps{
+		SubPath: cfg.SubPath, Store: st, PublicHost: cfg.PublicHost, Decoy: cfg.Decoy,
 	})
 	srv := &http.Server{
-		Handler:           stealth.Gate(cfg.BasePath, cfg.Decoy, handler),
+		Handler:           stealth.Gate(cfg.Decoy, map[string]http.Handler{cfg.BasePath: handler, cfg.SubPath: sub}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -149,6 +180,14 @@ func serve(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// defaultXrayBin is where scripts/install-xray.sh puts the core on Linux.
+func defaultXrayBin() string {
+	if runtime.GOOS == "linux" {
+		return "/usr/local/lib/panel/xray/xray"
+	}
+	return "xray"
 }
 
 func loadCert(dataDir string, cfg config.Config) (tls.Certificate, error) {

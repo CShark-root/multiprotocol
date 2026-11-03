@@ -13,18 +13,25 @@ import (
 	"panel/internal/panel/config"
 )
 
-// Gate passes requests under /<basePath>/ to next and answers everything else
-// according to mode.
-func Gate(basePath string, mode config.DecoyMode, next http.Handler) http.Handler {
-	prefix := "/" + basePath + "/"
+// Gate dispatches requests by their first path segment: /<secret>/... goes
+// to routes[secret]; everything else is answered according to mode.
+// Secrets are compared in constant time.
+func Gate(mode config.DecoyMode, routes map[string]http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seg, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
-		if subtle.ConstantTimeCompare([]byte(seg), []byte(basePath)) != 1 {
+		var next http.Handler
+		var secret string
+		for s, h := range routes {
+			if subtle.ConstantTimeCompare([]byte(seg), []byte(s)) == 1 {
+				next, secret = h, s
+			}
+		}
+		if next == nil {
 			Decoy(w, mode)
 			return
 		}
-		if !strings.HasPrefix(r.URL.Path, prefix) {
-			// Exactly "/<basePath>": only someone who knows the secret gets here.
+		if prefix := "/" + secret + "/"; !strings.HasPrefix(r.URL.Path, prefix) {
+			// Exactly "/<secret>": only someone who knows it gets here.
 			http.Redirect(w, r, prefix, http.StatusFound)
 			return
 		}
