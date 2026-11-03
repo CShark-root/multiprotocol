@@ -43,6 +43,8 @@ cd web && npm run dev                        # http://localhost:5173/dev/ с hot
 
 `-dev` работает только на `127.0.0.1` и без TLS. Тесты: `go test ./...`.
 
+Проверка с настоящим Xray и телефоном — на виртуалке Hyper-V: [docs/vm-setup.md](docs/vm-setup.md).
+
 ## Лицензия
 
 MIT
