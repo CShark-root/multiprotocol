@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Scandinavian palette: warm off-white and soft charcoal, a muted fjord
+   blue-green accent, sage / ochre / terracotta for states. */
+:root {
+  --background: oklch(0.975 0.006 85);
+  --foreground: oklch(0.28 0.012 60);
+  --card: oklch(0.995 0.003 85);
+  --muted: oklch(0.95 0.008 85);
+  --muted-foreground: oklch(0.54 0.014 65);
+  --border: oklch(0.9 0.009 80);
+  --input: oklch(0.88 0.01 80);
+  --primary: oklch(0.5 0.065 205);
+  --primary-foreground: oklch(0.99 0.003 85);
+  --accent: oklch(0.94 0.022 205);
+  --accent-foreground: oklch(0.38 0.06 205);
+  --success: oklch(0.58 0.08 150);
+  --success-soft: oklch(0.94 0.03 150);
+  --warning: oklch(0.66 0.11 75);
+  --warning-soft: oklch(0.95 0.04 80);
+  --destructive: oklch(0.56 0.13 35);
+  --destructive-soft: oklch(0.95 0.03 35);
+  --ring: oklch(0.6 0.07 205);
+}
+
+.dark {
+  --background: oklch(0.2 0.006 70);
+  --foreground: oklch(0.93 0.008 85);
+  --card: oklch(0.235 0.007 70);
+  --muted: oklch(0.27 0.007 70);
+  --muted-foreground: oklch(0.7 0.012 80);
+  --border: oklch(0.31 0.007 70);
+  --input: oklch(0.35 0.008 70);
+  --primary: oklch(0.72 0.07 205);
+  --primary-foreground: oklch(0.2 0.012 205);
+  --accent: oklch(0.3 0.03 205);
+  --accent-foreground: oklch(0.86 0.05 205);
+  --success: oklch(0.72 0.09 150);
+  --success-soft: oklch(0.3 0.04 150);
+  --warning: oklch(0.8 0.11 80);
+  --warning-soft: oklch(0.32 0.05 80);
+  --destructive: oklch(0.7 0.13 35);
+  --destructive-soft: oklch(0.32 0.05 35);
+  --ring: oklch(0.72 0.07 205);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+  dialog::backdrop {
+    background: oklch(0.2 0.01 70 / 0.35);
+    backdrop-filter: blur(2px);
+  }
+}

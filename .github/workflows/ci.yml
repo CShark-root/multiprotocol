@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Web
+        run: cd web && npm ci && npm run build && npm audit --omit=dev --audit-level=high
+      - name: Go vet and test
+        run: go vet ./... && go test ./...
+      - name: Vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Build linux binaries
+        run: make build-linux
