@@ -184,7 +184,45 @@ export type SystemInfo = {
   } | null
 }
 
+export type TargetResult = {
+  host: string
+  ip?: string
+  good: boolean
+  tls13: boolean
+  h2: boolean
+  certOk: boolean
+  rttMs: number
+  error?: string
+}
+
+export type LogEntry = { id: number; ts: string; level: 'debug' | 'info' | 'warn' | 'error'; source: string; msg: string; fields?: Record<string, string> }
+export type LogFilter = { source?: string; level?: string; q?: string; before?: number }
+export type PanelEvent = {
+  id: number
+  ts: string
+  type: string
+  severity: 'info' | 'warning' | 'danger'
+  userId?: number
+  userName?: string
+  message: string
+  data?: Record<string, unknown>
+}
+export type AuditRecord = { id: number; ts: string; admin: string; action: string; targetType: string; targetId: string; diff: unknown }
+
+const query = (params: Record<string, string | number | undefined>) => {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '' && v !== 0) q.set(k, String(v))
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+/** Live log stream URL (Server-Sent Events, same-origin cookie auth). */
+export const logStreamUrl = (f: LogFilter) => basePath + 'api/logs/stream' + query({ source: f.source, level: f.level, q: f.q })
+
 export const api = {
+  logs: (f: LogFilter) => request<LogEntry[]>('GET', 'logs' + query({ ...f, limit: 300 })),
+  events: (before?: number) => request<PanelEvent[]>('GET', 'events' + query({ before, limit: 100 })),
+  audit: (before?: number) => request<AuditRecord[]>('GET', 'audit' + query({ before, limit: 100 })),
   authState: () => request<AuthState>('GET', 'auth/state'),
   setup: (username: string, password: string) =>
     request<{ admin: Admin }>('POST', 'auth/setup', { username, password }),
@@ -203,6 +241,7 @@ export const api = {
     list: () => request<Inbound[]>('GET', 'inbounds'),
     suggest: (protocol: Protocol) => request<InboundSuggest>('GET', `inbounds/suggest?protocol=${protocol}`),
     createTestKit: () => request<{ inbounds: number }>('POST', 'inbounds/test-kit', {}),
+    scanTargets: (hosts: string[] = []) => request<TargetResult[]>('POST', 'inbounds/scan-targets', { hosts }),
     deleteTestKit: () => request<{ inbounds: number }>('DELETE', 'inbounds/test-kit'),
     create: (input: InboundInput) => request<Inbound>('POST', 'inbounds', input),
     update: (id: number, input: InboundInput) => request<Inbound>('PUT', `inbounds/${id}`, input),

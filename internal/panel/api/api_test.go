@@ -19,6 +19,7 @@ import (
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
+	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
 	"panel/internal/panel/store"
@@ -49,6 +50,9 @@ func newClient(t *testing.T) *client {
 		Auth:     auth.NewService(st),
 		Users:    service.NewUsers(st, nil),
 		Inbounds: service.NewInbounds(st, nil, 1),
+		Events:   service.NewEvents(st),
+		Journal:  journal.NewHub(st),
+		Store:    st,
 		Agent:    agent.New(),
 		Web: fstest.MapFS{
 			"index.html":      {Data: []byte("<html><head><title>x</title></head></html>")},
@@ -307,6 +311,37 @@ func TestTestKit(t *testing.T) {
 	}
 	if code, body := c.json("GET", "/api/users", nil); code != 200 || string(body) != "[]\n" {
 		t.Fatalf("test-kit user must be removed: %s", body)
+	}
+}
+
+func TestJournalEndpoints(t *testing.T) {
+	c := newClient(t)
+	c.expect(401, "GET", "/api/logs", nil)
+	creds := map[string]string{"username": "admin", "password": "a-long-enough-password"}
+	c.expect(200, "POST", "/api/auth/setup", creds)
+	c.expect(201, "POST", "/api/users", map[string]any{"name": "phone"})
+	c.expect(204, "POST", "/api/auth/logout", nil)
+	c.expect(401, "POST", "/api/auth/login", map[string]string{"username": "admin", "password": "wrong-password"})
+	c.expect(200, "POST", "/api/auth/login", creds)
+
+	code, body := c.json("GET", "/api/events", nil)
+	var events []map[string]any
+	json.Unmarshal(body, &events)
+	if code != 200 || len(events) != 2 || events[0]["type"] != "auth.login" || events[1]["type"] != "auth.failed" {
+		t.Fatalf("events: %d %s", code, body)
+	}
+	if events[1]["data"].(map[string]any)["username"] != "admin" {
+		t.Fatalf("failed login must record the attempted name: %v", events[1])
+	}
+
+	code, body = c.json("GET", "/api/audit", nil)
+	var audit []map[string]any
+	json.Unmarshal(body, &audit)
+	if code != 200 || len(audit) != 1 || audit[0]["action"] != "user.create" || audit[0]["admin"] != "admin" {
+		t.Fatalf("audit: %d %s", code, body)
+	}
+	if code, _ := c.json("GET", "/api/logs?level=warn&q=x", nil); code != 200 {
+		t.Fatalf("logs: %d", code)
 	}
 }
 

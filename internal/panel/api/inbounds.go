@@ -194,6 +194,22 @@ var masqueradeSites = []string{
 	"https://www.bing.com/", "https://www.cloudflare.com/", "https://www.google.com/", "https://www.youtube.com/",
 }
 
+// scanTargets measures candidate Reality / ShadowTLS sites from this server.
+func (s *server) scanTargets(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Hosts []string `json:"hosts"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	results, err := s.Scanner.Scan(r.Context(), in.Hosts)
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
 func (s *server) createTestKit(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Inbounds.CreateTestKit(r.Context(), adminFrom(r.Context()).ID)
 	if errors.Is(err, service.ErrTestKitExists) {

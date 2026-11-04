@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"panel/internal/panel/auth"
+	"panel/internal/panel/service"
 	"panel/internal/panel/store"
 )
 
@@ -74,6 +75,8 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	token, admin, err := s.Auth.Login(r.Context(), in.Username, in.Password, clientIP(r), r.UserAgent())
 	if errors.Is(err, auth.ErrInvalidCredentials) {
 		s.Logger.Warn("failed login", "ip", clientIP(r))
+		s.Events.Add(r.Context(), service.EventLoginFailed, "warning", 0, "",
+			map[string]any{"ip": clientIP(r), "username": truncate(in.Username, 64)})
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}
@@ -82,6 +85,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Logger.Info("admin logged in", "admin", admin.Username, "ip", clientIP(r))
+	s.Events.Add(r.Context(), service.EventLogin, "info", 0, "", map[string]any{"ip": clientIP(r), "admin": admin.Username})
 	s.setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, map[string]*adminDTO{"admin": toAdminDTO(admin)})
 }
@@ -143,6 +147,13 @@ func (s *server) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
 func adminFrom(ctx context.Context) store.Admin {
 	a, _ := ctx.Value(adminKey).(store.Admin)
 	return a
@@ -152,6 +163,7 @@ func (s *server) limitLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.loginLimiter.allow(clientIP(r), time.Now()) {
 			s.Logger.Warn("login rate limit hit", "ip", clientIP(r))
+			s.Events.Add(r.Context(), service.EventLoginThrottle, "danger", 0, "", map[string]any{"ip": clientIP(r)})
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			return
 		}

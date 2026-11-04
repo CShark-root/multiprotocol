@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Cable, CheckCircle2, ChevronDown, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, Cable, CheckCircle2, ChevronDown, FlaskConical, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { ApiError, api, protocolOrder, protocolSpecs, type Inbound, type InboundInput, type Protocol, type Transport } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
@@ -207,6 +207,101 @@ export function InboundsPage() {
   )
 }
 
+/** The camouflage site field with "find the best": the server checks
+ *  candidate sites from its own network and ranks them. */
+function TargetField(props: {
+  label: string
+  hint: string
+  error?: string
+  value: string
+  onChange: (v: string) => void
+  suggestions: string[]
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const scan = useMutation({ mutationFn: () => api.inbounds.scanTargets() })
+  return (
+    <div className="space-y-2">
+      <Field label={props.label} hint={props.hint} error={props.error}>
+        {(id) => (
+          <div className="flex gap-2">
+            <Input id={id} list="reality-targets" value={props.value} onChange={(e) => props.onChange(e.target.value)} required />
+            <datalist id="reality-targets">
+              {props.suggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            <Button
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              disabled={scan.isPending}
+              onClick={() => {
+                setOpen(true)
+                scan.mutate()
+              }}
+            >
+              <Sparkles className="h-4 w-4" />
+              {t('inbounds.finder.button')}
+            </Button>
+          </div>
+        )}
+      </Field>
+      {open && (
+        <div className="rounded-xl border bg-card p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">{t('inbounds.finder.title')}</div>
+              <div className="text-xs text-muted-foreground">{t('inbounds.finder.hint')}</div>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              {t('inbounds.finder.close')}
+            </Button>
+          </div>
+          {scan.isPending ? (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t('inbounds.finder.scanning')}
+            </p>
+          ) : scan.isError ? (
+            <p className="mt-3 text-sm text-destructive">{(scan.error as Error).message}</p>
+          ) : (
+            <ul className="mt-2 max-h-64 divide-y overflow-y-auto">
+              {scan.data?.map((r) => (
+                <li key={r.host} className="flex items-center gap-3 py-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">{r.host}</span>
+                  {r.good ? (
+                    <>
+                      <span className="text-xs tabular-nums text-muted-foreground">{r.rttMs} ms</span>
+                      <Badge tone="success">{t('inbounds.finder.fits')}</Badge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={props.value === r.host ? 'primary' : 'secondary'}
+                        onClick={() => {
+                          props.onChange(r.host)
+                          setOpen(false)
+                        }}
+                      >
+                        {t('inbounds.finder.use')}
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="truncate text-xs text-muted-foreground" title={r.error}>
+                      {t('inbounds.finder.noFit')}
+                      {r.error ? ` · ${r.error}` : ''}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function InboundFacts({ ib }: { ib: Inbound }) {
   const { t } = useTranslation()
   const facts: [string, string][] = []
@@ -373,29 +468,15 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
         </div>
         {!errors.port && <p className="-mt-2 text-xs text-muted-foreground">{t(portHint)}</p>}
 
-        {realityProtocols.includes(p) && (
-          <Field label={t('inbounds.target')} hint={t('inbounds.targetHint')} error={errors.target}>
-            {(id) => (
-              <>
-                <Input id={id} list="reality-targets" value={form.target} onChange={(e) => set('target', e.target.value)} required />
-                <datalist id="reality-targets">
-                  {suggest.data?.targets.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              </>
-            )}
-          </Field>
-        )}
-        {p === 'shadowtls' && (
-          <Field label={t('inbounds.handshake')} hint={t('inbounds.handshakeHint')} error={errors.target}>
-            {(id) => (
-              <>
-                <Input id={id} list="reality-targets" value={form.target} onChange={(e) => set('target', e.target.value)} required />
-                <datalist id="reality-targets">
-                  {suggest.data?.targets.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              </>
-            )}
-          </Field>
+        {(realityProtocols.includes(p) || p === 'shadowtls') && (
+          <TargetField
+            label={t(p === 'shadowtls' ? 'inbounds.handshake' : 'inbounds.target')}
+            hint={t(p === 'shadowtls' ? 'inbounds.handshakeHint' : 'inbounds.targetHint')}
+            error={errors.target}
+            value={form.target}
+            onChange={(v) => set('target', v)}
+            suggestions={suggest.data?.targets ?? []}
+          />
         )}
         {p === 'hysteria2' && (
           <>

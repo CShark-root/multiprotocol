@@ -18,7 +18,9 @@ import (
 
 	"panel/internal/agent"
 	"panel/internal/panel/auth"
+	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
+	"panel/internal/panel/store"
 )
 
 type Deps struct {
@@ -27,8 +29,12 @@ type Deps struct {
 	Users      *service.Users
 	Inbounds   *service.Inbounds
 	Syncer     *service.Syncer // nil without a local agent
-	Agent      *agent.Agent    // nil when the panel runs without a local agent
-	Web        fs.FS           // built frontend (web/dist)
+	Events     *service.Events
+	Journal    *journal.Hub
+	Store      *store.Store // read-only views: logs, events, audit
+	Scanner    *service.Scanner
+	Agent      *agent.Agent // nil when the panel runs without a local agent
+	Web        fs.FS        // built frontend (web/dist)
 	Logger     *slog.Logger
 	TLS        bool   // served over HTTPS: Secure cookies and HSTS
 	PublicHost string // host clients connect to, for share links
@@ -78,11 +84,16 @@ func New(d Deps) http.Handler {
 					r.Delete("/{id}", s.deleteUser)
 					r.Get("/{id}/links", s.userLinks)
 				})
+				r.Get("/logs", s.listLogs)
+				r.Get("/logs/stream", s.streamLogs)
+				r.Get("/events", s.listEvents)
+				r.Get("/audit", s.listAudit)
 				r.Route("/inbounds", func(r chi.Router) {
 					r.Get("/", s.listInbounds)
 					r.Post("/", s.createInbound)
 					r.Get("/suggest", s.suggestInbound)
 					r.Post("/test-kit", s.createTestKit)
+					r.Post("/scan-targets", s.scanTargets)
 					r.Delete("/test-kit", s.deleteTestKit)
 					r.Get("/{id}", s.getInbound)
 					r.Put("/{id}", s.updateInbound)

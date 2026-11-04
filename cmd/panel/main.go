@@ -30,6 +30,7 @@ import (
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
+	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
 	"panel/internal/panel/store"
@@ -90,6 +91,16 @@ func serve(args []string) int {
 	}
 	defer st.Close()
 
+	// From here on every log record (panel and core output) also goes to the
+	// journal shown in the UI.
+	hub := journal.NewHub(st)
+	hubDone := make(chan struct{})
+	go func() { hub.Run(ctx); close(hubDone) }()
+	defer func() { stop(); <-hubDone }() // flush the last batch before the store closes
+	log = slog.New(hub.Handler(log.Handler()))
+	slog.SetDefault(log)
+	events := service.NewEvents(st)
+
 	authSvc := auth.NewService(st)
 	var localAgent *agent.Agent
 	var syncer *service.Syncer
@@ -100,7 +111,7 @@ func serve(args []string) int {
 		sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
 		localAgent = agent.New(xr, hy, sb)
 		defer localAgent.Stop()
-		syncer = service.NewSyncer(st, localAgent, *xrayAPI, log)
+		syncer = service.NewSyncer(st, localAgent, events, *xrayAPI, log)
 		changed = syncer.Trigger
 		go syncer.Run(ctx)
 	}
@@ -126,6 +137,10 @@ func serve(args []string) int {
 		Users:      service.NewUsers(st, changed),
 		Inbounds:   service.NewInbounds(st, changed, panelPort),
 		Syncer:     syncer,
+		Events:     events,
+		Journal:    hub,
+		Store:      st,
+		Scanner:    service.NewScanner(),
 		Agent:      localAgent,
 		Web:        web.Files(),
 		Logger:     log,
