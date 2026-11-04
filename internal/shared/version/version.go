@@ -3,3 +3,6 @@
 package version
 
 var Version = "dev"
+
+// Repo is the GitHub repository releases come from (owner/name).
+var Repo = "CShark-root/multiprotocol"

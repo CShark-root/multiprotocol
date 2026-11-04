@@ -1,0 +1,11 @@
+[Unit]
+Description=panel - run an update when the panel asks for one
+
+[Path]
+# The panel creates this file (it can write only its own data directory);
+# panel-update.service, running as root, does the update and removes it.
+PathExists=/var/lib/panel/update-request
+Unit=panel-update.service
+
+[Install]
+WantedBy=multi-user.target

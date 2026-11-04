@@ -365,6 +365,14 @@ export const api = {
     status: () => request<{ helper: boolean; status?: { docker: boolean; containers: AmneziaContainer[]; checkedAt: string } }>('GET', 'amnezia'),
     logs: (name: string) => request<string[]>('GET', 'amnezia/logs?tail=300&name=' + encodeURIComponent(name)),
   },
+  update: {
+    status: (check: boolean) =>
+      request<{ current: string; repo: string; latest: { tag: string; url: string; published: string } | null; error: string; supported: boolean; pending: boolean; log?: string[] }>(
+        'GET',
+        'system/update' + (check ? '?check=1' : ''),
+      ),
+    start: (cores: boolean) => request<{ started: boolean }>('POST', 'system/update', { cores }),
+  },
   restartCores: () => request<void>('POST', 'system/restart-cores', {}),
   reboot: (password: string) => request<{ rebooting: boolean }>('POST', 'system/reboot', { password }),
   online: () => request<OnlineEntry[]>('GET', 'online'),

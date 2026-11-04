@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Installs or updates the panel on a Linux server from files copied into
-# $1 (default /tmp): panel-linux-amd64, panel.service and the
-# install-{xray,hysteria,singbox}.sh scripts.
-# Used by scripts/vm/deploy.ps1; the future one-line installer reuses it.
+# Installs or updates the panel on a Linux server from files in $1 (default
+# /tmp): panel-linux-<arch>, the systemd units and the
+# install-{xray,hysteria,singbox}.sh scripts. Used by install.sh (one-line
+# install from a GitHub release) and by scripts/vm/deploy.ps1. Data in
+# /var/lib/panel is never touched. UPDATE_CORES=1 also reinstalls the cores
+# at their latest versions.
 set -euo pipefail
 SRC="${1:-/tmp}"
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo bash $0" >&2; exit 1; }
@@ -16,12 +18,40 @@ done
 
 id panel &>/dev/null || useradd --system --home-dir /var/lib/panel --shell /usr/sbin/nologin panel
 
-install -m 0755 "$SRC/panel-linux-amd64" /usr/local/bin/panel
+case "$(uname -m)" in
+  x86_64|amd64)  ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+install -m 0755 "$SRC/panel-linux-$ARCH" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 install -m 0644 "$SRC/panel-amnezia.service" /etc/systemd/system/panel-amnezia.service
-[[ -x /usr/local/lib/panel/xray/xray ]] || bash "$SRC/install-xray.sh"
-[[ -x /usr/local/lib/panel/hysteria/hysteria ]] || bash "$SRC/install-hysteria.sh"
-[[ -x /usr/local/lib/panel/sing-box/sing-box ]] || bash "$SRC/install-singbox.sh"
+# Updates from the panel's own "Update" button: the panel only drops a request
+# file, systemd runs the checksum-verified installer as root.
+install -d -m 0755 /usr/local/lib/panel
+install -m 0755 "$SRC/panel-update.sh" /usr/local/lib/panel/panel-update.sh
+install -m 0644 "$SRC/panel-update.service" /etc/systemd/system/panel-update.service
+install -m 0644 "$SRC/panel-update.path" /etc/systemd/system/panel-update.path
+[[ -f $SRC/install.sh ]] && install -m 0755 "$SRC/install.sh" /usr/local/lib/panel/install.sh
+for core in xray hysteria sing-box; do
+  bin=/usr/local/lib/panel/$core/$core
+  if [[ ! -x $bin || "${UPDATE_CORES:-0}" == 1 ]]; then
+    bash "$SRC/install-${core//-/}.sh"
+  fi
+done
+
+# Network tuning in a file of our own: BBR for TCP (Xray) and larger socket
+# buffers for QUIC (Hysteria2, TUIC). Nothing Docker or Amnezia rely on
+# (ip_forward and the like) is touched.
+modprobe tcp_bbr 2>/dev/null || true
+cat > /etc/sysctl.d/90-panel.conf <<'SYSCTL'
+# Written by the panel installer.
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+SYSCTL
+sysctl -q -p /etc/sysctl.d/90-panel.conf || echo "note: some network settings were not applied" >&2
 
 # The one extra right the panel gets: rebooting the machine from the
 # dashboard (logind asks polkit). "multiple-sessions" covers an open SSH login.
@@ -49,7 +79,8 @@ RULES
 fi
 
 systemctl daemon-reload
-systemctl enable panel panel-amnezia >/dev/null 2>&1
+systemctl enable panel panel-amnezia panel-update.path >/dev/null 2>&1
+systemctl start panel-update.path
 # The Amnezia tab helper only reads Docker; Docker itself is left alone.
 systemctl restart panel-amnezia
 systemctl restart panel

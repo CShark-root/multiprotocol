@@ -117,3 +117,10 @@ func notFound(err error) error {
 }
 
 func fromUnix(v int64) time.Time { return time.Unix(v, 0).UTC() }
+
+// Snapshot writes a consistent copy of the database to path (which must
+// not exist) while the panel keeps running.
+func (s *Store) Snapshot(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
+}

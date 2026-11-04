@@ -21,6 +21,10 @@ $files = @(
     "scripts\install-singbox.sh",
     "deploy\panel.service",
     "deploy\panel-amnezia.service",
+    "deploy\panel-update.service",
+    "deploy\panel-update.path",
+    "deploy\panel-update.sh",
+    "install.sh",
     "deploy\remote-install.sh"
 ) | ForEach-Object { Join-Path $root $_ }
 

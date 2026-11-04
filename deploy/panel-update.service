@@ -1,0 +1,8 @@
+[Unit]
+Description=panel - update to the latest release
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/panel/panel-update.sh
+TimeoutStartSec=15min

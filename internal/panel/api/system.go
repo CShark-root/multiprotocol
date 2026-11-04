@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/panel/backup"
 	"panel/internal/panel/store"
 	"panel/internal/shared/version"
 )
@@ -78,4 +79,27 @@ func (s *server) rebootServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"rebooting": true})
+}
+
+// downloadBackup streams a backup after the admin re-enters the password:
+// the archive holds every key and secret path.
+func (s *server) downloadBackup(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	admin := adminFrom(r.Context())
+	if err := s.Auth.ConfirmPassword(admin, in.Password); err != nil {
+		s.authError(w, r, err)
+		return
+	}
+	s.Store.AddAudit(r.Context(), store.AuditEntry{AdminID: admin.ID, Action: "backup.download", TargetType: "system"}, time.Now())
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+backup.Name(time.Now())+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	if err := backup.Write(r.Context(), s.Store, s.Panel.DataDir, w); err != nil {
+		s.Logger.Error("backup", "err", err)
+	}
 }

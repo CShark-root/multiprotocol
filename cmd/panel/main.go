@@ -6,11 +6,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -34,6 +36,7 @@ import (
 	"panel/internal/amnezia"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
+	"panel/internal/panel/backup"
 	"panel/internal/panel/config"
 	"panel/internal/panel/domain"
 	"panel/internal/panel/geo"
@@ -56,6 +59,12 @@ func main() {
 			os.Exit(showURL(os.Args[2:]))
 		case "set-host":
 			os.Exit(setHost(os.Args[2:]))
+		case "admin":
+			os.Exit(adminCmd(os.Args[2:]))
+		case "backup":
+			os.Exit(backupCmd(os.Args[2:]))
+		case "restore":
+			os.Exit(restoreCmd(os.Args[2:]))
 		case "amnezia-helper":
 			os.Exit(amneziaHelper(os.Args[2:]))
 		}
@@ -441,4 +450,131 @@ func amneziaClient(dev bool) *amnezia.HelperClient {
 		return nil
 	}
 	return amnezia.NewClient(amnezia.HelperSocket)
+}
+
+// backupCmd writes a backup file; it works while the panel runs.
+//
+//	sudo -u panel panel backup -data-dir /var/lib/panel -out /tmp/panel.tar.gz
+func backupCmd(args []string) int {
+	fsFlags := flag.NewFlagSet("backup", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "data", "panel data directory")
+	out := fsFlags.String("out", "", "file to write (default: a dated name in the current directory)")
+	fsFlags.Parse(args)
+	if *out == "" {
+		*out = backup.Name(time.Now())
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(*dataDir, "panel.db"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open database:", err)
+		return 1
+	}
+	defer st.Close()
+	f, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := backup.Write(ctx, st, *dataDir, f); err != nil {
+		f.Close()
+		os.Remove(*out)
+		fmt.Fprintln(os.Stderr, "backup:", err)
+		return 1
+	}
+	if err := f.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(*out)
+	return 0
+}
+
+// restoreCmd unpacks a backup; stop the panel first. On a new server run
+// `panel set-host` afterwards if its address differs.
+//
+//	sudo systemctl stop panel
+//	sudo -u panel panel restore -data-dir /var/lib/panel backup.tar.gz
+//	sudo systemctl start panel
+func restoreCmd(args []string) int {
+	fsFlags := flag.NewFlagSet("restore", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "data", "panel data directory")
+	fsFlags.Parse(args)
+	if fsFlags.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: panel restore -data-dir DIR backup.tar.gz")
+		return 2
+	}
+	f, err := os.Open(fsFlags.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer f.Close()
+	got, err := backup.Restore(f, *dataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "restore:", err)
+		return 1
+	}
+	fmt.Println("restored:", strings.Join(got, ", "))
+	fmt.Println("previous files were kept with the suffix .before-restore")
+	return 0
+}
+
+// adminCmd creates the first admin or sets a new password. The password is
+// read from stdin (one line), never from the command line, so it does not
+// end up in the process list or shell history.
+//
+//	panel admin -data-dir D -check                  exit 0 if an admin exists, 3 if not
+//	echo "$PW" | panel admin -data-dir D -username alice
+//	echo "$PW" | panel admin -data-dir D -username alice -disable-2fa
+func adminCmd(args []string) int {
+	fsFlags := flag.NewFlagSet("admin", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "data", "panel data directory")
+	username := fsFlags.String("username", "", "admin login")
+	check := fsFlags.Bool("check", false, "only report whether an admin exists")
+	no2fa := fsFlags.Bool("disable-2fa", false, "also turn two-factor authentication off (lost phone)")
+	fsFlags.Parse(args)
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(*dataDir, "panel.db"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open database:", err)
+		return 1
+	}
+	defer st.Close()
+	svc := auth.NewService(st)
+	names, err := svc.Admins(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if *check {
+		if len(names) == 0 {
+			return 3
+		}
+		fmt.Println(strings.Join(names, "\n"))
+		return 0
+	}
+	if *username == "" {
+		fmt.Fprintln(os.Stderr, "usage: panel admin -data-dir DIR -username NAME  (password on stdin)")
+		return 2
+	}
+	line, err := bufio.NewReader(io.LimitReader(os.Stdin, 4096)).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		fmt.Fprintln(os.Stderr, "read password:", err)
+		return 1
+	}
+	password := strings.TrimRight(line, "\r\n")
+	if len(names) == 0 {
+		if _, err := svc.Setup(ctx, *username, password); err != nil {
+			fmt.Fprintln(os.Stderr, "create admin:", err)
+			return 1
+		}
+		fmt.Println("admin created:", *username)
+		return 0
+	}
+	if err := svc.ResetPassword(ctx, *username, password, *no2fa); err != nil {
+		fmt.Fprintln(os.Stderr, "set password:", err)
+		return 1
+	}
+	fmt.Println("password changed for", *username, "- all sessions signed out")
+	return 0
 }

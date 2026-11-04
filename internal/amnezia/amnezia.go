@@ -49,13 +49,13 @@ type Container struct {
 // Client is one access shared from the Amnezia app. Keys stay out: only
 // a short fingerprint of the public key is shown.
 type Client struct {
-	Name          string    `json:"name"`
-	ID            string    `json:"id"` // shortened public key / client id
-	Created       string    `json:"created,omitempty"`
+	Name          string     `json:"name"`
+	ID            string     `json:"id"` // shortened public key / client id
+	Created       string     `json:"created,omitempty"`
 	LastHandshake *time.Time `json:"lastHandshake,omitempty"` // nil: the protocol does not report it
-	Endpoint      string    `json:"endpoint,omitempty"`
-	RxBytes       int64     `json:"rxBytes"`
-	TxBytes       int64     `json:"txBytes"`
+	Endpoint      string     `json:"endpoint,omitempty"`
+	RxBytes       int64      `json:"rxBytes"`
+	TxBytes       int64      `json:"txBytes"`
 }
 
 // docker is a minimal client for the Docker Engine API over its socket.

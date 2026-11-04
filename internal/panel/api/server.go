@@ -85,6 +85,9 @@ func New(d Deps) http.Handler {
 				r.Get("/system", s.system)
 				r.Post("/system/restart-cores", s.restartCores)
 				r.Post("/system/reboot", s.rebootServer)
+				r.Post("/system/backup", s.downloadBackup)
+				r.Get("/system/update", s.updateStatus)
+				r.Post("/system/update", s.startUpdate)
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/", s.listUsers)
 					r.Post("/", s.createUser)

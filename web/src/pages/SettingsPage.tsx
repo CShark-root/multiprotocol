@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Globe, KeyRound, Monitor, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
-import { ApiError, api, type PanelSettings } from '@/lib/api'
+import { Archive, Download, Globe, KeyRound, Monitor, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
+import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
 import { Badge, Button, Card, Field, Input, PageHeader, Select } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
 
@@ -15,6 +15,8 @@ export function SettingsPage() {
         <div className="space-y-4">
           <AddressCard />
           <DomainCard />
+          <BackupCard />
+          <UpdateCard />
         </div>
         <div className="space-y-4">
           <TotpCard />
@@ -507,6 +509,144 @@ function DomainCard() {
             )}
           </div>
         )}
+      </div>
+    </Section>
+  )
+}
+
+function BackupCard() {
+  const { t } = useTranslation()
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+
+  async function download(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    setDone(false)
+    try {
+      const res = await fetch(basePath + 'api/system/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!res.ok) {
+        setError(res.status === 403 ? t('dashboard.wrongPassword') : t('common.error'))
+        return
+      }
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'multiprotocol-backup.tar.gz'
+      const url = URL.createObjectURL(await res.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setPassword('')
+      setDone(true)
+    } catch {
+      setError(t('common.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Section icon={<Archive className="h-5 w-5" />} title={t('backup.title')} hint={t('backup.hint')}>
+      <form onSubmit={download} className="space-y-3">
+        <Field label={t('dashboard.rebootPassword')} error={error || undefined}>
+          {(id) => <Input id={id} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
+        </Field>
+        <Button type="submit" variant="secondary" disabled={busy || !password}>
+          <Archive className="h-4 w-4" />
+          {t('backup.download')}
+        </Button>
+        {done && <p className="text-xs text-muted-foreground">{t('backup.done')}</p>}
+        <p className="text-xs text-muted-foreground">{t('backup.restoreHint')}</p>
+      </form>
+    </Section>
+  )
+}
+
+function UpdateCard() {
+  const { t, i18n } = useTranslation()
+  const [started, setStarted] = useState<string | null>(null) // version when the update began
+  const [cores, setCores] = useState(false)
+  const q = useQuery({
+    queryKey: ['update'],
+    queryFn: () => api.update.status(false),
+    // While updating the panel restarts: keep asking until it is back.
+    refetchInterval: started ? 3000 : false,
+    retry: started ? true : 1,
+  })
+  const check = useMutation({ mutationFn: () => api.update.status(true), onSuccess: (d) => q.refetch().then(() => d) })
+  const start = useMutation({
+    mutationFn: () => api.update.start(cores),
+    onSuccess: () => setStarted(q.data?.current ?? ''),
+  })
+  const d = check.data ?? q.data
+  const log = q.data?.log ?? []
+  const finished = log.length > 0 && /== .*(done|failed)$/.test(log[log.length - 1])
+  useEffect(() => {
+    // A new version answered: reload so the page matches the new panel.
+    if (started !== null && q.data && !q.data.pending && (q.data.current !== started || finished)) {
+      if (q.data.current !== started) window.location.reload()
+      else setStarted(null)
+    }
+  }, [q.data, started, finished])
+
+  if (!d) return null
+  const latest = d.latest?.tag
+  const newer = latest && latest !== d.current
+  return (
+    <Section icon={<Download className="h-5 w-5" />} title={t('update.title')} hint={t('update.hint')}>
+      <div className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">{t('update.current')}</span>
+          <span className="font-mono">{d.current}</span>
+          {latest && (
+            <>
+              <span className="text-muted-foreground">· {t('update.latest')}</span>
+              <a href={d.latest!.url} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-2">
+                {latest}
+              </a>
+              {newer ? <Badge tone="accent">{t('update.available')}</Badge> : <Badge tone="success">{t('update.upToDate')}</Badge>}
+            </>
+          )}
+        </div>
+        {d.error && <p className="text-xs text-muted-foreground">{t('update.checkFailed', { error: d.error })}</p>}
+        {started !== null ? (
+          <div className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-accent-foreground">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            {t('update.running')}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button size="sm" disabled={!d.supported || start.isPending} onClick={() => start.mutate()}>
+              <Download className="h-4 w-4" />
+              {newer ? t('update.updateTo', { version: latest }) : t('update.reinstall')}
+            </Button>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={cores} onChange={(e) => setCores(e.target.checked)} />
+              {t('update.withCores')}
+            </label>
+            <Button size="sm" variant="ghost" disabled={check.isPending} onClick={() => check.mutate()}>
+              {t('update.check')}
+            </Button>
+          </div>
+        )}
+        {!d.supported && <p className="text-xs text-muted-foreground">{t('update.unsupported')}</p>}
+        {start.isError && <p className="text-xs text-destructive">{t('common.error')}</p>}
+        {log.length > 0 && (
+          <details>
+            <summary className="cursor-pointer text-xs text-muted-foreground">
+              {t('update.log')} {finished && log[log.length - 1].endsWith('failed') && <span className="text-destructive">· {t('update.failed')}</span>}
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-xl bg-muted p-3 text-[11px]">{log.join('\n')}</pre>
+          </details>
+        )}
+        <p className="text-xs text-muted-foreground">{t('update.howItWorks', { lng: i18n.language })}</p>
       </div>
     </Section>
   )

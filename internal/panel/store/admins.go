@@ -75,3 +75,20 @@ func scanAdmin(row *sql.Row) (Admin, error) {
 	a.CreatedAt = fromUnix(created)
 	return a, nil
 }
+
+func (s *Store) AdminUsernames(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT username FROM admins ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

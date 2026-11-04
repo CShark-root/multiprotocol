@@ -1,0 +1,49 @@
+name: release
+
+# Push a tag like v0.2.0 to publish a release. install.sh and the panel's
+# Update button download multiprotocol-linux-<arch>.tar.gz from the latest one.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Web
+        run: cd web && npm ci && npm run build
+      - name: Test
+        run: go vet ./... && go test ./...
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for ARCH in amd64 arm64; do
+            PKG="pkg-$ARCH"
+            mkdir -p "$PKG"
+            GOOS=linux GOARCH=$ARCH CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X panel/internal/shared/version.Version=$VERSION" \
+              -o "$PKG/panel-linux-$ARCH" ./cmd/panel
+            cp install.sh deploy/remote-install.sh deploy/panel.service deploy/panel-amnezia.service \
+               deploy/panel-update.service deploy/panel-update.path deploy/panel-update.sh \
+               scripts/install-xray.sh scripts/install-hysteria.sh scripts/install-singbox.sh "$PKG/"
+            tar -czf "dist/multiprotocol-linux-$ARCH.tar.gz" -C "$PKG" .
+            (cd dist && sha256sum "multiprotocol-linux-$ARCH.tar.gz" > "multiprotocol-linux-$ARCH.tar.gz.sha256")
+          done
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes

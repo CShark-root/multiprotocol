@@ -256,3 +256,30 @@ func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
+
+// ResetPassword sets a new password from the server's command line (the
+// installer, or an admin who forgot it) and ends every session. With
+// disableTOTP it also switches two-factor authentication off, for a lost
+// phone.
+func (s *Service) ResetPassword(ctx context.Context, username, password string, disableTOTP bool) error {
+	if err := validPassword(password); err != nil {
+		return err
+	}
+	admin, err := s.store.AdminByUsername(ctx, username)
+	if err != nil {
+		return err
+	}
+	if err := s.store.SetAdminPassword(ctx, admin.ID, HashPassword(password)); err != nil {
+		return err
+	}
+	if disableTOTP {
+		if err := s.store.SetAdminTOTP(ctx, admin.ID, ""); err != nil {
+			return err
+		}
+	}
+	_, err = s.store.DeleteOtherSessions(ctx, admin.ID, "")
+	return err
+}
+
+// Admins lists admin usernames.
+func (s *Service) Admins(ctx context.Context) ([]string, error) { return s.store.AdminUsernames(ctx) }

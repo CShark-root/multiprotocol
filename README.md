@@ -6,6 +6,24 @@ Open-source VPN-панель для личного использования: X
 
 > Статус: в разработке, проверяется на тестовой виртуалке. Что осталось до переезда на VPS — в PLAN.md, раздел «Готовность к переезду».
 
+## Установка
+
+Ubuntu 22.04+ или Debian 12+, x86-64 или ARM64, от root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CShark-root/multiprotocol/main/install.sh | sudo bash
+```
+
+В конце установщик печатает адрес панели (`https://IP:ПОРТ/<секрет>/`) и отпечаток сертификата. Администратор создаётся при первом входе. Повторный запуск той же команды (или кнопка «Настройки → Обновления») обновляет панель, данные сохраняются. Docker и Amnezia установщик не трогает.
+
+Проверить сервер до установки, ничего не меняя:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CShark-root/multiprotocol/main/scripts/vps-check.sh | sudo bash
+```
+
+Переезд с другой панели: [docs/migration.md](docs/migration.md).
+
 ## Что уже есть
 
 - **11 протоколов на трёх ядрах:** Xray (VLESS и Trojan с Reality на XHTTP/TCP/gRPC, Shadowsocks-2022, VMess), Hysteria2, sing-box (TUIC, AnyTLS, ShadowTLS); «Тестовый набор» одной кнопкой; режим «Эксперт» со всеми параметрами XHTTP, Reality (включая ML-DSA-65), sniffing и sockopt; подбор сайта для маскировки.

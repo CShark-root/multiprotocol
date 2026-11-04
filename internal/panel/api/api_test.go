@@ -607,3 +607,13 @@ func TestAmneziaKey(t *testing.T) {
 		t.Fatalf("no helper in tests: %v", st)
 	}
 }
+
+func TestBackupDownload(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	c.expect(403, "POST", "/api/system/backup", map[string]string{"password": "wrong"})
+	code, body := c.json("POST", "/api/system/backup", map[string]string{"password": "a-long-enough-password"})
+	if code != 200 || len(body) < 100 || body[0] != 0x1f || body[1] != 0x8b {
+		t.Fatalf("backup: %d, %d bytes", code, len(body))
+	}
+}
