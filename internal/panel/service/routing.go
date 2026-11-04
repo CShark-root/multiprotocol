@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -61,6 +63,11 @@ type Routing struct {
 	cacheIP   map[string][]netip.Prefix
 	codesKey  string
 	codes     map[string]bool // "geosite:openai", "geoip:ru" present in the databases
+
+	listMu    sync.Mutex
+	listKey   string
+	listSites []string
+	listIPs   []string
 }
 
 func NewRouting(st *store.Store, events *Events, geoDir string, changed func(), restart func() error, log *slog.Logger) *Routing {
@@ -285,11 +292,54 @@ func (r *Routing) RunGeoUpdates(ctx context.Context) {
 	}
 }
 
-// GeoCodes lists the categories of the installed databases.
+// GeoCodes lists the categories of the installed databases, read once per
+// database version (runetfreedom's geosite.dat alone is ~86 MB).
 func (r *Routing) GeoCodes() (sites, ips []string) {
-	sites, _ = geo.Codes(filepath.Join(r.geoDir, "geosite.dat"))
-	ips, _ = geo.Codes(filepath.Join(r.geoDir, "geoip.dat"))
-	return sites, ips
+	files := r.fileKey()
+	r.listMu.Lock()
+	defer r.listMu.Unlock()
+	if files != r.listKey {
+		r.listSites, _ = geo.Codes(filepath.Join(r.geoDir, "geosite.dat"))
+		r.listIPs, _ = geo.Codes(filepath.Join(r.geoDir, "geoip.dat"))
+		r.listKey = files
+		debug.FreeOSMemory()
+	}
+	return r.listSites, r.listIPs
+}
+
+// hysteriaGeo writes (once per database version and set of categories) a
+// directory with geo files trimmed to what the rules use, and returns it.
+// The name changes with the content, so Hysteria restarts by itself.
+func (r *Routing) hysteriaGeo(key string, sites, ips []string) string {
+	if len(sites)+len(ips) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	name := "hysteria-" + hex.EncodeToString(sum[:6])
+	dir := filepath.Join(r.geoDir, name)
+	if _, err := os.Stat(filepath.Join(dir, "geoip.dat")); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			r.log.Warn("hysteria geo subset", "err", err)
+			return r.geoDir
+		}
+		err1 := geo.Subset(filepath.Join(r.geoDir, "geosite.dat"), filepath.Join(dir, "geosite.dat"), sites)
+		err2 := geo.Subset(filepath.Join(r.geoDir, "geoip.dat"), filepath.Join(dir, "geoip.dat"), ips)
+		if err := errors.Join(err1, err2); err != nil {
+			r.log.Warn("hysteria geo subset", "err", err)
+			os.RemoveAll(dir)
+			return r.geoDir
+		}
+		debug.FreeOSMemory()
+	}
+	// Older subsets go once they cannot be needed for a rollback any more.
+	if old, _ := filepath.Glob(filepath.Join(r.geoDir, "hysteria-*")); len(old) > 0 {
+		for _, o := range old {
+			if st, err := os.Stat(o); err == nil && filepath.Base(o) != name && time.Since(st.ModTime()) > time.Hour {
+				os.RemoveAll(o)
+			}
+		}
+	}
+	return dir
 }
 
 // Compile prepares the routing input for the compilers. The geo categories
@@ -335,7 +385,7 @@ func (r *Routing) Compile(ctx context.Context) (compile.Routing, error) {
 	}
 	siteMap, ipMap := r.cacheSite, r.cacheIP
 	r.mu.Unlock()
-	return compile.NewRouting(s, r.geoDir, has, siteMap, ipMap), nil
+	return compile.NewRouting(s, r.hysteriaGeo(key, sites, ips), has, siteMap, ipMap), nil
 }
 
 func joinKey(sites, ips []string) string {

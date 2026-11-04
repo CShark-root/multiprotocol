@@ -234,3 +234,38 @@ func parseCIDR(b []byte) (netip.Prefix, bool) {
 	p, err := addr.Unmap().Prefix(bits)
 	return p, err == nil
 }
+
+// Subset writes a database holding only the wanted categories (copied
+// byte for byte). Hysteria loads its geo files whole, so it gets a subset
+// of a few kilobytes instead of a database of tens of megabytes.
+func Subset(src, dst string, want []string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	var out []byte
+	rest := data
+	for len(rest) > 0 {
+		start := rest
+		num, typ, _, payload, next, err := field(rest)
+		if err != nil {
+			return err
+		}
+		rest = next
+		if num != 1 || typ != 2 {
+			continue
+		}
+		code, err := firstString(payload)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(want, strings.ToLower(code)) {
+			out = append(out, start[:len(start)-len(next)]...)
+		}
+	}
+	tmp := dst + ".new"
+	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
+}

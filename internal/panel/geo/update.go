@@ -17,7 +17,8 @@ import (
 // Files are the two databases, by the names Xray and Hysteria expect.
 var Files = []string{"geoip.dat", "geosite.dat"}
 
-const maxSize = 64 << 20
+// runetfreedom's geosite.dat is ~86 MB.
+const maxSize = 256 << 20
 
 var client = &http.Client{Timeout: 3 * time.Minute}
 
