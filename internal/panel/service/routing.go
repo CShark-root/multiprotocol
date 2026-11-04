@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -124,6 +126,7 @@ func (r *Routing) Save(ctx context.Context, adminID int64, in routing.Settings) 
 	if next.WARP.Mode != routing.WarpOff && next.WARP.Account == nil {
 		return cur, validate.Fail("warp.mode", "register WARP first")
 	}
+	r.remember(ctx, cur, next)
 	if err := r.store.SetSetting(ctx, routingKey, next); err != nil {
 		return cur, err
 	}
@@ -466,12 +469,18 @@ func carryOutbounds(in *routing.Settings, cur routing.Settings) error {
 			o.Bridge = old.Bridge
 			continue
 		}
-		o.ID = strings.ToLower(randomToken(4))
-		port, err := freeLoopbackPort()
-		if err != nil {
-			return err
+		// A brand new exit gets an id; one coming back with a rollback keeps
+		// its id (rules refer to it) and its bridge.
+		if o.ID == "" {
+			o.ID = strings.ToLower(randomToken(4))
 		}
-		o.Bridge = routing.Bridge{Port: port, User: "out", Password: randomToken(16)}
+		if o.Bridge.Port == 0 {
+			port, err := freeLoopbackPort()
+			if err != nil {
+				return err
+			}
+			o.Bridge = routing.Bridge{Port: port, User: "out", Password: randomToken(16)}
+		}
 	}
 	return nil
 }
@@ -496,4 +505,92 @@ func (r *Routing) CheckOutbound(ctx context.Context, id string) (warp.Trace, err
 		return warp.Trace{}, store.ErrNotFound
 	}
 	return warp.Check(ctx, &o.Bridge)
+}
+
+const routingHistoryKey = "routing_history"
+const historyKeep = 20
+
+// RoutingVersion is a previous state of the routing settings.
+type RoutingVersion struct {
+	At       time.Time        `json:"at"`
+	Changed  []string         `json:"changed"` // sections that differ from the version after it
+	Settings routing.Settings `json:"settings"`
+}
+
+// sections compares the parts of the settings an admin edits.
+func sections(a, b routing.Settings) []string {
+	var out []string
+	eq := func(x, y any) bool {
+		bx, _ := json.Marshal(x)
+		by, _ := json.Marshal(y)
+		return bytes.Equal(bx, by)
+	}
+	for _, c := range []struct {
+		name string
+		x, y any
+	}{
+		{"protection", []bool{a.Presets.BlockPrivate, a.Presets.BlockSMTP, a.Presets.BlockBittorrent, a.Presets.BlockAds, a.Presets.GoogleIPv4}, []bool{b.Presets.BlockPrivate, b.Presets.BlockSMTP, b.Presets.BlockBittorrent, b.Presets.BlockAds, b.Presets.GoogleIPv4}},
+		{"countries", a.Presets.Countries, b.Presets.Countries},
+		{"warp", []any{a.WARP.Mode, a.Presets.WarpServices}, []any{b.WARP.Mode, b.Presets.WarpServices}},
+		{"rules", a.Rules, b.Rules},
+		{"outbounds", a.Outbounds, b.Outbounds},
+		{"dns", a.DNS, b.DNS},
+		{"geo", a.Geo, b.Geo},
+		{"client", a.Client, b.Client},
+	} {
+		if !eq(c.x, c.y) {
+			out = append(out, c.name)
+		}
+	}
+	return out
+}
+
+// remember keeps cur as a version when next changes something.
+func (r *Routing) remember(ctx context.Context, cur, next routing.Settings) {
+	changed := sections(cur, next)
+	if len(changed) == 0 {
+		return
+	}
+	var list []RoutingVersion
+	r.store.GetSetting(ctx, routingHistoryKey, &list)
+	list = append([]RoutingVersion{{At: r.now().UTC(), Changed: changed, Settings: cur}}, list...)
+	if len(list) > historyKeep {
+		list = list[:historyKeep]
+	}
+	r.store.SetSetting(ctx, routingHistoryKey, list)
+}
+
+// History lists previous versions, newest first.
+func (r *Routing) History(ctx context.Context) []RoutingVersion {
+	var list []RoutingVersion
+	r.store.GetSetting(ctx, routingHistoryKey, &list)
+	if list == nil {
+		list = []RoutingVersion{}
+	}
+	return list
+}
+
+// Rollback brings version i back. WARP and the bridges are live resources,
+// not settings, so they stay as they are now.
+func (r *Routing) Rollback(ctx context.Context, adminID int64, i int) (routing.Settings, error) {
+	list := r.History(ctx)
+	if i < 0 || i >= len(list) {
+		return routing.Settings{}, store.ErrNotFound
+	}
+	old := list[i].Settings
+	r.mu.Lock()
+	cur, err := r.Get(ctx)
+	r.mu.Unlock()
+	if err != nil {
+		return cur, err
+	}
+	old.WARP.Account = cur.WARP.Account
+	if old.WARP.Account == nil {
+		old.WARP.Mode = routing.WarpOff
+	}
+	next, err := r.Save(ctx, adminID, old)
+	if err == nil {
+		r.audit(ctx, adminID, "routing.rollback", "routing", "", map[string]any{"to": list[i].At})
+	}
+	return next, err
 }

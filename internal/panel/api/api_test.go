@@ -618,3 +618,26 @@ func TestBackupDownload(t *testing.T) {
 		t.Fatalf("backup: %d, %d bytes", code, len(body))
 	}
 }
+
+func TestRoutingHistory(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	body := func(ads bool) map[string]any {
+		return map[string]any{"presets": map[string]any{"blockPrivate": true, "blockAds": ads}, "rules": []any{}, "warp": map[string]any{"mode": "off"},
+			"dns": map[string]any{"upstream": "cloudflare", "strategy": "prefer4"}, "geo": map[string]any{"source": "loyalsoldier", "autoUpdate": true}}
+	}
+	c.expect(200, "PUT", "/api/routing", body(true))
+	c.expect(200, "PUT", "/api/routing", body(true)) // no change, no version
+	c.expect(200, "PUT", "/api/routing", body(false))
+	code, b := c.json("GET", "/api/routing/history", nil)
+	var hist []map[string]any
+	json.Unmarshal(b, &hist)
+	if code != 200 || len(hist) != 2 || hist[0]["changed"].([]any)[0] != "protection" {
+		t.Fatalf("history: %d %s", code, b)
+	}
+	got := c.expect(200, "POST", "/api/routing/history/0/restore", nil)
+	if got["presets"].(map[string]any)["blockAds"] != true {
+		t.Fatalf("rollback: %v", got["presets"])
+	}
+	c.expect(404, "POST", "/api/routing/history/99/restore", nil)
+}

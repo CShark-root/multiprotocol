@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  History,
   Smartphone,
   Waypoints,
   Trash2,
@@ -102,6 +103,7 @@ export function RoutingPage() {
     onSuccess: (data) => {
       qc.setQueryData(['routing'], data)
       setDraft(null)
+      qc.invalidateQueries({ queryKey: ['routing', 'history'] })
       setError('')
     },
     onError: (err) => setError(err instanceof ApiError && err.field ? `${err.field}: ${err.message}` : t('common.error')),
@@ -137,6 +139,7 @@ export function RoutingPage() {
           <OutboundsCard s={s} edit={edit} />
           <DnsCard s={s} edit={edit} />
           <GeoCard s={s} edit={edit} />
+          <HistoryCard onServer={accept} />
         </div>
       </div>
 
@@ -994,6 +997,54 @@ function ClientCard({ s, edit }: CardProps) {
         ))}
       </div>
       <p className="mt-3 text-xs text-muted-foreground">{t('routing.clientNote')}</p>
+    </Section>
+  )
+}
+
+function HistoryCard({ onServer }: { onServer: (d: RoutingSettings) => void }) {
+  const { t, i18n } = useTranslation()
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['routing', 'history'], queryFn: api.routing.history })
+  const [confirm, setConfirm] = useState<number | null>(null)
+  const restore = useMutation({
+    mutationFn: (i: number) => api.routing.rollback(i),
+    onSuccess: (d) => {
+      onServer(d)
+      setConfirm(null)
+      qc.invalidateQueries({ queryKey: ['routing', 'history'] })
+    },
+  })
+  const list = q.data ?? []
+  return (
+    <Section icon={<History className="h-5 w-5" />} title={t('routing.history')} hint={t('routing.historyHint')}>
+      {list.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('routing.historyEmpty')}</p>
+      ) : (
+        <ul className="divide-y rounded-xl border">
+          {list.slice(0, 8).map((v, i) => (
+            <li key={v.at} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+              <div>
+                <div>{new Date(v.at).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })}</div>
+                <div className="text-xs text-muted-foreground">{t('routing.historyChanged', { list: v.changed.map((c) => t(`routing.sections.${c}`)).join(', ') })}</div>
+              </div>
+              {confirm === i ? (
+                <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setConfirm(null)}>
+                    {t('common.cancel')}
+                  </Button>
+                  <Button size="sm" disabled={restore.isPending} onClick={() => restore.mutate(i)}>
+                    {t('routing.historyRestore')}
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setConfirm(i)}>
+                  {t('routing.historyRestore')}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </Section>
   )
 }

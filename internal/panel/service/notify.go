@@ -35,10 +35,10 @@ type TelegramSettings struct {
 var NotifyEvents = []string{
 	EventCoreDown, EventCoreUp, EventUserLimited, EventUserExpired, EventUserRestored,
 	EventLogin, EventLoginFailed, EventLoginThrottle, EventCertIssued, EventCertFailed,
-	EventGeoFailed, EventHopFailed,
+	EventGeoFailed, EventHopFailed, EventAmneziaDown, EventAmneziaUp,
 }
 
-var defaultNotify = []string{EventCoreDown, EventCoreUp, EventUserLimited, EventUserExpired, EventLogin, EventLoginThrottle, EventCertFailed, EventGeoFailed, EventHopFailed}
+var defaultNotify = []string{EventCoreDown, EventCoreUp, EventUserLimited, EventUserExpired, EventLogin, EventLoginThrottle, EventCertFailed, EventGeoFailed, EventHopFailed, EventAmneziaDown, EventAmneziaUp}
 
 // Notifier sends events to Telegram and the daily backup.
 type Notifier struct {
@@ -179,6 +179,10 @@ func eventText(e store.Event, name string) string {
 		return "⚠️ Не обновились гео-базы: " + str(d, "error")
 	case EventHopFailed:
 		return "⚠️ Port hopping не включён: " + str(d, "error")
+	case EventAmneziaDown:
+		return "⚠️ Контейнер Amnezia " + str(d, "container") + " остановился: " + e.Message
+	case EventAmneziaUp:
+		return "✅ Контейнер Amnezia " + str(d, "container") + " снова работает"
 	}
 	return e.Type
 }

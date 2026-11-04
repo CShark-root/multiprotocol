@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -239,4 +240,30 @@ func (s *server) checkOutbound(w http.ResponseWriter, r *http.Request) {
 		out["trace"] = tr
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) routingHistory(w http.ResponseWriter, r *http.Request) {
+	type item struct {
+		At      time.Time `json:"at"`
+		Changed []string  `json:"changed"`
+	}
+	out := []item{}
+	for _, v := range s.Routing.History(r.Context()) {
+		out = append(out, item{At: v.At, Changed: v.Changed})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) routingRollback(w http.ResponseWriter, r *http.Request) {
+	i, err := strconv.Atoi(chi.URLParam(r, "i"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_index", "bad version")
+		return
+	}
+	st, err := s.Routing.Rollback(r.Context(), adminFrom(r.Context()).ID, i)
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.toRoutingDTO(r, st))
 }

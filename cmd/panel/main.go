@@ -198,6 +198,8 @@ func serve(args []string) int {
 		}
 	})
 	go domains.Run(ctx)
+	amneziaRO := amneziaClient(*dev)
+	go service.WatchAmnezia(ctx, amneziaRO, events)
 	notifier := service.NewNotifier(st, events, *dataDir, cfg.PublicHost, log)
 	go notifier.Run(ctx)
 
@@ -208,7 +210,7 @@ func serve(args []string) int {
 		Inbounds:   inboundsSvc,
 		Domains:    domains,
 		Telegram:   notifier,
-		Amnezia:    amneziaClient(*dev),
+		Amnezia:    amneziaRO,
 		Syncer:     syncer,
 		Events:     events,
 		Journal:    hub,
