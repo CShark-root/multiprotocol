@@ -50,7 +50,7 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 	// The bridge runs whenever WARP is registered and on, even before any rule
 	// uses it: the WARP check goes through it.
 	bridge := rt.Warp != nil && rt.Bridge.Port > 0
-	if len(ins) == 0 && !bridge {
+	if len(ins) == 0 && !bridge && len(rt.Custom) == 0 {
 		return nil, nil
 	}
 	var rules []any
@@ -64,6 +64,21 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 			},
 		})
 		rules = append(rules, map[string]any{"inboundTag": []string{"warp-bridge"}, "outboundTag": routing.WARP})
+	}
+	for _, c := range rt.Custom {
+		if c.Bridge.Port == 0 {
+			continue
+		}
+		in := "bridge_" + c.Tag
+		ins = append(ins, map[string]any{
+			"tag": in, "listen": "127.0.0.1", "port": c.Bridge.Port, "protocol": "socks",
+			"settings": map[string]any{
+				"auth":     "password",
+				"accounts": []any{map[string]any{"user": c.Bridge.User, "pass": c.Bridge.Password}},
+				"udp":      true,
+			},
+		})
+		rules = append(rules, map[string]any{"inboundTag": []string{in}, "outboundTag": c.Tag})
 	}
 	needIP := false
 	for _, r := range rt.Rules {
@@ -137,6 +152,13 @@ func xrayOutbounds(rt Routing) []any {
 			},
 		})
 	}
+	for _, c := range rt.Custom {
+		o := map[string]any{"tag": c.Tag, "protocol": c.Out.Protocol, "settings": c.Out.Settings}
+		if c.Out.Stream != nil {
+			o["streamSettings"] = c.Out.Stream
+		}
+		outs = append(outs, o)
+	}
 	for i, o := range outs {
 		if o.(map[string]any)["tag"] == rt.Final {
 			outs[0], outs[i] = outs[i], outs[0]
@@ -149,7 +171,7 @@ func xrayOutbounds(rt Routing) []any {
 // freedomStrategy makes the direct outbound resolve with Xray's own DNS
 // (and its IPv4/IPv6 preference); with the system resolver it stays AsIs.
 func freedomStrategy(d routing.DNSSettings) string {
-	if _, ok := d.Server(); !ok {
+	if _, ok := d.Server(); !ok && len(d.Extra) == 0 && len(d.Hosts) == 0 {
 		return ""
 	}
 	switch d.Strategy {
@@ -162,19 +184,55 @@ func freedomStrategy(d routing.DNSSettings) string {
 }
 
 func xrayDNS(d routing.DNSSettings) map[string]any {
-	srv, ok := d.Server()
-	if !ok {
-		return nil
+	main, ok := d.Server()
+	if !ok && len(d.Extra) == 0 && len(d.Hosts) == 0 {
+		return nil // the system resolver, nothing to configure
 	}
-	server := srv.URL
-	if server == "" {
-		server = srv.Host
+	addr := func(s routing.DNSServer) string {
+		if s.URL != "" {
+			return s.URL
+		}
+		return s.Host
+	}
+	var servers []any
+	// Extra servers first: Xray tries a server whose domains match before
+	// the plain ones.
+	for _, e := range d.Extra {
+		srv, err := routing.ResolveServer(e.Server)
+		if err != nil {
+			continue
+		}
+		servers = append(servers, map[string]any{"address": addr(srv), "domains": e.Domains, "skipFallback": true})
+	}
+	if ok {
+		servers = append(servers, addr(main))
+	} else {
+		servers = append(servers, "localhost") // the system resolver
 	}
 	q := "UseIP"
 	if d.Strategy == routing.OnlyIPv4 {
 		q = "UseIPv4"
 	}
-	return map[string]any{"servers": []string{server}, "queryStrategy": q}
+	cfg := map[string]any{"servers": servers, "queryStrategy": q}
+	for k, v := range map[string]bool{
+		"disableCache": d.DisableCache, "disableFallback": d.DisableFallback,
+		"disableFallbackIfMatch": d.DisableFallbackIfMatch, "enableParallelQuery": d.Parallel, "useSystemHosts": d.SystemHosts,
+	} {
+		if v {
+			cfg[k] = true
+		}
+	}
+	if d.ClientIP != "" {
+		cfg["clientIp"] = d.ClientIP
+	}
+	if len(d.Hosts) > 0 {
+		hosts := map[string]string{}
+		for _, h := range d.Hosts {
+			hosts[h.Name] = h.IP
+		}
+		cfg["hosts"] = hosts
+	}
+	return cfg
 }
 
 // xrayRules translates one rule. Inside an Xray rule all fields must match,
@@ -183,7 +241,7 @@ func xrayDNS(d routing.DNSSettings) map[string]any {
 func xrayRules(r routing.Final) (rules []any, usesIP bool) {
 	domains, ips := split(r.Match)
 	base := func() map[string]any {
-		m := map[string]any{"outboundTag": r.Outbound}
+		m := map[string]any{"outboundTag": outTag(r.Outbound)}
 		if r.Ports != "" {
 			m["port"] = r.Ports
 		}

@@ -6,9 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"panel/internal/panel/geo"
+	"panel/internal/panel/outbound"
 	"panel/internal/panel/routing"
 	"panel/internal/panel/service"
+	"panel/internal/panel/store"
 	"panel/internal/panel/validate"
 )
 
@@ -28,14 +32,21 @@ type ruleDTO struct {
 	Support routing.Support `json:"support"`
 }
 
+type outDTO struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+}
+
 type routingDTO struct {
-	Presets  routing.Presets     `json:"presets"`
-	Rules    []ruleDTO           `json:"rules"`
-	WARP     warpDTO             `json:"warp"`
-	DNS      routing.DNSSettings `json:"dns"`
-	Geo      routing.GeoSettings `json:"geo"`
-	Services []string            `json:"services"`
-	GeoState struct {
+	Presets   routing.Presets     `json:"presets"`
+	Rules     []ruleDTO           `json:"rules"`
+	WARP      warpDTO             `json:"warp"`
+	DNS       routing.DNSSettings `json:"dns"`
+	Geo       routing.GeoSettings `json:"geo"`
+	Services  []string            `json:"services"`
+	Outbounds []outDTO            `json:"outbounds"`
+	GeoState  struct {
 		service.GeoStatus
 		Files []geo.Info `json:"files"`
 	} `json:"geoState"`
@@ -50,6 +61,13 @@ type routingInput struct {
 	} `json:"warp"`
 	DNS routing.DNSSettings `json:"dns"`
 	Geo routing.GeoSettings `json:"geo"`
+	// Exits: existing ones by id (their link stays on the server), new ones
+	// with a link and no id.
+	Outbounds []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Link string `json:"link"`
+	} `json:"outbounds"`
 }
 
 func (s *server) toRoutingDTO(r *http.Request, st routing.Settings) routingDTO {
@@ -64,6 +82,14 @@ func (s *server) toRoutingDTO(r *http.Request, st routing.Settings) routingDTO {
 	}
 	for _, sv := range routing.Services {
 		d.Services = append(d.Services, sv.Key)
+	}
+	d.Outbounds = []outDTO{}
+	for _, o := range st.Outbounds {
+		summary := ""
+		if p, err := outbound.Parse(o.Link); err == nil {
+			summary = p.Describe()
+		}
+		d.Outbounds = append(d.Outbounds, outDTO{ID: o.ID, Name: o.Name, Summary: summary})
 	}
 	d.GeoState.GeoStatus = s.Routing.GeoStatus(r.Context())
 	d.GeoState.Files = geo.Installed(s.Routing.GeoDir())
@@ -89,6 +115,9 @@ func (s *server) saveRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	st := routing.Settings{Presets: in.Presets, Rules: in.Rules, DNS: in.DNS, Geo: in.Geo}
 	st.WARP.Mode = in.WARP.Mode
+	for _, o := range in.Outbounds {
+		st.Outbounds = append(st.Outbounds, routing.CustomOutbound{ID: o.ID, Name: o.Name, Link: o.Link})
+	}
 	saved, err := s.Routing.Save(r.Context(), adminFrom(r.Context()).ID, st)
 	if err != nil {
 		s.handleError(w, r, err)
@@ -191,4 +220,19 @@ func (s *server) geoCodes(w http.ResponseWriter, r *http.Request) {
 func (s *server) geoCountries(w http.ResponseWriter, r *http.Request) {
 	list, ruBlocked := s.Routing.Countries()
 	writeJSON(w, http.StatusOK, map[string]any{"countries": list, "ruBlocked": ruBlocked})
+}
+
+func (s *server) checkOutbound(w http.ResponseWriter, r *http.Request) {
+	tr, err := s.Routing.CheckOutbound(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		s.handleError(w, r, err)
+		return
+	}
+	out := map[string]any{}
+	if err != nil {
+		out["error"] = err.Error()
+	} else {
+		out["trace"] = tr
+	}
+	writeJSON(w, http.StatusOK, out)
 }

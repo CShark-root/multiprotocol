@@ -89,6 +89,13 @@ func hysteriaRouting(rt Routing) (acl map[string]any, outbounds []any, resolver 
 			"addr": "127.0.0.1:" + strconv.Itoa(rt.Bridge.Port), "username": rt.Bridge.User, "password": rt.Bridge.Password,
 		}})
 	}
+	for _, c := range rt.Custom {
+		if c.Bridge.Port > 0 {
+			outbounds = append(outbounds, map[string]any{"name": c.Tag, "type": "socks5", "socks5": map[string]any{
+				"addr": "127.0.0.1:" + strconv.Itoa(c.Bridge.Port), "username": c.Bridge.User, "password": c.Bridge.Password,
+			}})
+		}
+	}
 	var lines []string
 	usesGeo := false
 	for _, r := range rt.Rules {
@@ -101,6 +108,13 @@ func hysteriaRouting(rt Routing) (acl map[string]any, outbounds []any, resolver 
 		}
 		if out == routing.WARP && !warp {
 			out = routing.Direct
+		}
+		if strings.HasPrefix(out, routing.OutPrefix) {
+			if c := rt.custom(outTag(out)); c != nil && c.Bridge.Port > 0 {
+				out = c.Tag
+			} else {
+				out = routing.Direct
+			}
 		}
 		var addrs []string
 		domains, ips := split(r.Match)

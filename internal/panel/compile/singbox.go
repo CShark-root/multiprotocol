@@ -34,13 +34,18 @@ func SingBox(inbounds []store.Inbound, users []store.User, rt Routing) ([]byte, 
 	// WARP goes through Xray's loopback bridge, like Hysteria: one WARP
 	// device for all cores, and per-user outbounds keep traffic accounting.
 	warp := rt.usesWarp() && rt.Bridge.Port > 0
-	dnsServer, strategy := singboxDNS(rt.DNS)
+	dnsCfg, strategy := singboxDNSConfig(rt)
 
 	// Every user gets their own outbound of each kind, so the agent can
 	// attribute traffic by the outbound tag whatever the rules choose.
 	kinds := []string{routing.Direct, routing.IPv4}
 	if warp {
 		kinds = append(kinds, routing.WARP)
+	}
+	for _, c := range rt.Custom {
+		if c.Bridge.Port > 0 {
+			kinds = append(kinds, c.Tag)
+		}
 	}
 	outbounds := []any{map[string]any{"type": "direct", "tag": "direct"}}
 	for _, u := range users {
@@ -53,6 +58,12 @@ func SingBox(inbounds []store.Inbound, users []store.User, rt Routing) ([]byte, 
 				o["type"] = "socks"
 				o["server"], o["server_port"] = "127.0.0.1", rt.Bridge.Port
 				o["username"], o["password"] = rt.Bridge.User, rt.Bridge.Password
+			default:
+				if c := rt.custom(k); c != nil {
+					o["type"] = "socks"
+					o["server"], o["server_port"] = "127.0.0.1", c.Bridge.Port
+					o["username"], o["password"] = c.Bridge.User, c.Bridge.Password
+				}
 			}
 			outbounds = append(outbounds, o)
 		}
@@ -93,6 +104,13 @@ func SingBox(inbounds []store.Inbound, users []store.User, rt Routing) ([]byte, 
 		if kind == routing.WARP && !warp {
 			kind = routing.Direct
 		}
+		if strings.HasPrefix(kind, routing.OutPrefix) {
+			if c := rt.custom(outTag(kind)); c != nil && c.Bridge.Port > 0 {
+				kind = c.Tag
+			} else {
+				kind = routing.Direct
+			}
+		}
 		for _, u := range users {
 			email := Email(u.ID)
 			if len(r.Users) > 0 && !slices.Contains(r.Users, email) {
@@ -122,7 +140,7 @@ func SingBox(inbounds []store.Inbound, users []store.User, rt Routing) ([]byte, 
 	}
 	cfg := map[string]any{
 		"log":       map[string]any{"level": "warn", "timestamp": false},
-		"dns":       map[string]any{"servers": []any{dnsServer}},
+		"dns":       dnsCfg,
 		"inbounds":  ins,
 		"outbounds": outbounds,
 		"route":     route,
@@ -306,4 +324,56 @@ func singboxInbounds(ib store.Inbound, users []store.User) []any {
 		}}
 	}
 	return nil
+}
+
+// singboxDNSConfig is the main server (tag "dns"), the extra per-site
+// servers with their rules, fixed hosts and the cache flag.
+func singboxDNSConfig(rt Routing) (map[string]any, string) {
+	main, strategy := singboxDNS(rt.DNS)
+	servers := []any{main}
+	var rules []any
+	if len(rt.DNS.Hosts) > 0 {
+		pre := map[string]any{}
+		var names []string
+		for _, h := range rt.DNS.Hosts {
+			pre[h.Name] = []string{h.IP}
+			names = append(names, h.Name)
+		}
+		servers = append(servers, map[string]any{"type": "hosts", "tag": "hosts", "predefined": pre})
+		rules = append(rules, map[string]any{"domain": names, "server": "hosts"})
+	}
+	for i, e := range rt.DNS.Extra {
+		srv, err := routing.ResolveServer(e.Server)
+		if err != nil {
+			continue
+		}
+		tag := "dns-" + strconv.Itoa(i+1)
+		m, _ := singboxDNS(routing.DNSSettings{Upstream: "custom", Custom: firstNonEmpty(srv.URL, srv.Host)})
+		m["tag"] = tag
+		cond, ok := singboxMatch(routing.Final{Match: e.Domains}, rt)
+		if !ok || cond == nil {
+			continue
+		}
+		cond["server"] = tag
+		servers = append(servers, m)
+		rules = append(rules, cond)
+	}
+	cfg := map[string]any{"servers": servers}
+	if len(rules) > 0 {
+		cfg["rules"] = rules
+	}
+	if rt.DNS.DisableCache {
+		cfg["disable_cache"] = true
+	}
+	if rt.DNS.ClientIP != "" {
+		cfg["client_subnet"] = rt.DNS.ClientIP
+	}
+	return cfg, strategy
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

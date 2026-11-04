@@ -114,6 +114,9 @@ func (r *Routing) Save(ctx context.Context, adminID int64, in routing.Settings) 
 		return slices.ContainsFunc(users, func(u store.User) bool { return u.ID == id })
 	}
 	in.WARP.Account, in.Bridge = cur.WARP.Account, cur.Bridge
+	if err := carryOutbounds(&in, cur); err != nil {
+		return cur, err
+	}
 	next, err := routing.Normalize(in, exists)
 	if err != nil {
 		return cur, err
@@ -370,6 +373,11 @@ func (r *Routing) Compile(ctx context.Context) (compile.Routing, error) {
 	}
 	rules, _ := s.Expand(compile.Email, has)
 	sites, ips := routing.GeoNames(rules)
+	for _, n := range s.DNS.DNSGeoNames() {
+		if has("geosite:"+n) && !slices.Contains(sites, n) {
+			sites = append(sites, n)
+		}
+	}
 	key := files + "|" + joinKey(sites, ips)
 	r.mu.Lock()
 	if key != r.cacheKey {
@@ -443,4 +451,49 @@ func (r *Routing) Countries() (list []Country, ruBlocked bool) {
 		}
 	}
 	return list, slices.Contains(sites, routing.RuBlocked) || slices.Contains(ips, routing.RuBlocked)
+}
+
+// carryOutbounds keeps the stored link and bridge of exits the UI sends back
+// by id (it never receives links, which hold passwords) and gives new exits
+// an id and a bridge.
+func carryOutbounds(in *routing.Settings, cur routing.Settings) error {
+	for i := range in.Outbounds {
+		o := &in.Outbounds[i]
+		if old := findOutbound(cur, o.ID); old != nil {
+			if o.Link == "" {
+				o.Link = old.Link
+			}
+			o.Bridge = old.Bridge
+			continue
+		}
+		o.ID = strings.ToLower(randomToken(4))
+		port, err := freeLoopbackPort()
+		if err != nil {
+			return err
+		}
+		o.Bridge = routing.Bridge{Port: port, User: "out", Password: randomToken(16)}
+	}
+	return nil
+}
+
+func findOutbound(s routing.Settings, id string) *routing.CustomOutbound {
+	for i := range s.Outbounds {
+		if id != "" && s.Outbounds[i].ID == id {
+			return &s.Outbounds[i]
+		}
+	}
+	return nil
+}
+
+// CheckOutbound fetches Cloudflare's trace through a custom exit.
+func (r *Routing) CheckOutbound(ctx context.Context, id string) (warp.Trace, error) {
+	s, err := r.Get(ctx)
+	if err != nil {
+		return warp.Trace{}, err
+	}
+	o := findOutbound(s, id)
+	if o == nil {
+		return warp.Trace{}, store.ErrNotFound
+	}
+	return warp.Check(ctx, &o.Bridge)
 }

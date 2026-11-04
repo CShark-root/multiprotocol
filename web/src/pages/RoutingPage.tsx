@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Waypoints,
   Trash2,
 } from 'lucide-react'
 import {
@@ -28,7 +29,14 @@ import { formatBytes } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
 
 const outbounds: Outbound[] = ['direct', 'block', 'warp', 'ipv4']
-const outboundTone: Record<Outbound, 'muted' | 'danger' | 'accent' | 'warning'> = {
+// Labels for outbounds, including the admin's own exits ("out:<id>").
+function useOutLabel(custom: { id: string; name: string }[]) {
+  const { t } = useTranslation()
+  return (o: string) => (o.startsWith('out:') ? (custom.find((c) => `out:${c.id}` === o)?.name ?? o) : t(`routing.outbound.${o}`))
+}
+const customChoices = (custom: { id: string }[]) => custom.filter((c) => c.id).map((c) => `out:${c.id}` as Outbound)
+
+const outboundTone: Record<string, 'muted' | 'danger' | 'accent' | 'warning'> = {
   direct: 'muted',
   block: 'danger',
   warp: 'accent',
@@ -124,6 +132,7 @@ export function RoutingPage() {
         </div>
         <div className="space-y-4">
           <RulesCard s={s} edit={edit} users={users.data ?? []} />
+          <OutboundsCard s={s} edit={edit} />
           <DnsCard s={s} edit={edit} />
           <GeoCard s={s} edit={edit} />
         </div>
@@ -320,6 +329,7 @@ function SupportMarks({ support }: { support?: RoutingRule['support'] }) {
 
 function RulesCard({ s, edit, users }: CardProps & { users: User[] }) {
   const { t } = useTranslation()
+  const outLabel = useOutLabel(s.outbounds)
   const [editing, setEditing] = useState<{ index: number; rule: RoutingRule } | null>(null)
   const move = (i: number, by: number) =>
     edit((d) => {
@@ -350,7 +360,7 @@ function RulesCard({ s, edit, users }: CardProps & { users: User[] }) {
               <div className={'min-w-0 flex-1 ' + (r.enabled ? '' : 'opacity-60')}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{r.name || t('routing.untitled')}</span>
-                  <Badge tone={outboundTone[r.outbound]}>{t(`routing.outbound.${r.outbound}`)}</Badge>
+                  <Badge tone={outboundTone[r.outbound] ?? 'accent'}>{outLabel(r.outbound)}</Badge>
                 </div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">{ruleSummary(r, users, t)}</div>
                 <SupportMarks support={r.support} />
@@ -378,6 +388,7 @@ function RulesCard({ s, edit, users }: CardProps & { users: User[] }) {
         <RuleDialog
           rule={editing.rule}
           users={users}
+          custom={s.outbounds}
           warpOff={s.warp.mode === 'off' || !s.warp.registered}
           onClose={() => setEditing(null)}
           onSave={(r) => {
@@ -408,17 +419,20 @@ function ruleSummary(r: RoutingRule, users: User[], t: (k: string, o?: Record<st
 function RuleDialog({
   rule,
   users,
+  custom,
   warpOff,
   onClose,
   onSave,
 }: {
   rule: RoutingRule
   users: User[]
+  custom: { id: string; name: string }[]
   warpOff: boolean
   onClose: () => void
   onSave: (r: RoutingRule) => void
 }) {
   const { t } = useTranslation()
+  const outLabel = useOutLabel(custom)
   const [r, setR] = useState(rule)
   const [text, setText] = useState(rule.match.join('\n'))
   const [more, setMore] = useState(Boolean(rule.ports || rule.network || rule.protocols.length || rule.users.length))
@@ -474,9 +488,9 @@ function RuleDialog({
         <Field label={t('routing.ruleOutbound')}>
           {(id) => (
             <Select id={id} value={r.outbound} onChange={(e) => setR({ ...r, outbound: e.target.value as Outbound })}>
-              {outbounds.map((o) => (
+              {[...outbounds, ...customChoices(custom)].map((o) => (
                 <option key={o} value={o}>
-                  {t(`routing.outbound.${o}`)}
+                  {outLabel(o)}
                   {o === 'warp' && warpOff ? ` (${t('routing.warpOffNote')})` : ''}
                 </option>
               ))}
@@ -551,9 +565,26 @@ function RuleDialog({
 }
 
 const dnsUpstreams = ['cloudflare', 'google', 'quad9', 'adguard', 'system', 'custom']
+const extraPresets = ['yandex', 'cloudflare', 'google', 'quad9', 'adguard']
 
 function DnsCard({ s, edit }: CardProps) {
   const { t } = useTranslation()
+  const [hostsText, setHostsText] = useState(() => (s.dns.hosts ?? []).map((h) => `${h.name} ${h.ip}`).join('\n'))
+  const commitHosts = (text: string) =>
+    edit((d) => {
+      d.dns.hosts = text
+        .split('\n')
+        .map((l) => l.trim().split(/\s+/))
+        .filter((p) => p[0])
+        .map(([name, ip]) => ({ name, ip: ip ?? '' }))
+    })
+  const extra = s.dns.extra ?? []
+  const addRu = () =>
+    edit((d) => {
+      d.dns.extra = [...(d.dns.extra ?? []), { server: 'yandex', domains: ['domain:ru', 'domain:xn--p1ai', 'geosite:category-ru'] }]
+    })
+  const flags = ['disableCache', 'disableFallback', 'disableFallbackIfMatch', 'parallel', 'systemHosts'] as const
+
   return (
     <Section icon={<Globe className="h-5 w-5" />} title={t('routing.dns')} hint={t('routing.dnsHint')}>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -587,6 +618,96 @@ function DnsCard({ s, edit }: CardProps) {
           </Field>
         </div>
       )}
+
+      <div className="mt-5 border-t pt-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-medium">{t('routing.dnsExtra')}</div>
+            <p className="text-xs text-muted-foreground">{t('routing.dnsExtraHint')}</p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => edit((d) => (d.dns.extra = [...(d.dns.extra ?? []), { server: 'yandex', domains: [] }]))}>
+            <Plus className="h-4 w-4" />
+            {t('routing.dnsExtraAdd')}
+          </Button>
+        </div>
+        {extra.length === 0 ? (
+          <button type="button" onClick={addRu} className="mt-3 w-full rounded-xl border border-dashed p-3 text-left text-sm text-muted-foreground hover:bg-muted/60">
+            {t('routing.dnsExtraRu')}
+          </button>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {extra.map((e, i) => {
+              const preset = extraPresets.includes(e.server)
+              return (
+                <div key={i} className="rounded-xl border p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Select
+                      value={preset ? e.server : 'custom'}
+                      onChange={(ev) => edit((d) => (d.dns.extra[i].server = ev.target.value === 'custom' ? '' : ev.target.value))}
+                      className="w-auto min-w-48"
+                      aria-label={t('routing.dnsUpstream')}
+                    >
+                      {extraPresets.map((p) => (
+                        <option key={p} value={p}>
+                          {t(`routing.dnsUpstreams.${p}`)}
+                        </option>
+                      ))}
+                      <option value="custom">{t('routing.dnsUpstreams.custom')}</option>
+                    </Select>
+                    {!preset && (
+                      <Input
+                        value={e.server}
+                        onChange={(ev) => edit((d) => (d.dns.extra[i].server = ev.target.value))}
+                        placeholder="https://dns.example/dns-query"
+                        className="min-w-0 flex-1"
+                      />
+                    )}
+                    <Button variant="ghost" size="icon" aria-label={t('common.delete')} onClick={() => edit((d) => d.dns.extra.splice(i, 1))}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={e.domains.join('\n')}
+                    onChange={(ev) => edit((d) => (d.dns.extra[i].domains = ev.target.value.split('\n')))}
+                    placeholder={'domain:ru\ngeosite:category-ru'}
+                    aria-label={t('routing.dnsExtraDomains')}
+                    className="mt-2 w-full rounded-xl border border-input bg-card px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground">{t('routing.dnsHysteriaNote')}</p>
+      </div>
+
+      <details className="mt-4 border-t pt-4">
+        <summary className="cursor-pointer text-sm font-medium">{t('routing.dnsExpert')}</summary>
+        <div className="mt-3 divide-y">
+          {flags.map((k) => (
+            <ToggleRow key={k} title={t(`routing.dnsFlags.${k}`)} hint={t(`routing.dnsFlags.${k}Hint`)} checked={Boolean(s.dns[k])} onChange={(v) => edit((d) => (d.dns[k] = v))} />
+          ))}
+        </div>
+        <div className="mt-3 space-y-4">
+          <Field label={t('routing.dnsClientIp')} hint={t('routing.dnsClientIpHint')}>
+            {(id) => <Input id={id} value={s.dns.clientIp ?? ''} onChange={(e) => edit((d) => (d.dns.clientIp = e.target.value))} placeholder="203.0.113.1" />}
+          </Field>
+          <Field label={t('routing.dnsHosts')} hint={t('routing.dnsHostsHint')}>
+            {(id) => (
+              <textarea
+                id={id}
+                rows={3}
+                value={hostsText}
+                onChange={(e) => setHostsText(e.target.value)}
+                onBlur={() => commitHosts(hostsText)}
+                placeholder="router.lan 192.168.1.1"
+                className="w-full rounded-xl border border-input bg-card px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            )}
+          </Field>
+        </div>
+      </details>
     </Section>
   )
 }
@@ -649,6 +770,7 @@ function flag(code: string) {
 
 function CountriesCard({ s, edit }: CardProps) {
   const { t, i18n } = useTranslation()
+  const outLabel = useOutLabel(s.outbounds)
   const countries = useQuery({ queryKey: ['geoCountries'], queryFn: api.routing.geoCountries, staleTime: 5 * 60_000 })
   const [adding, setAdding] = useState('')
   const names = useMemo(() => {
@@ -689,7 +811,7 @@ function CountriesCard({ s, edit }: CardProps) {
                 <div className="text-xs text-muted-foreground">{hasSite(c.code) ? t('routing.countrySitesAndIps') : t('routing.countryIpsOnly')}</div>
               </div>
               <div className="flex rounded-xl border p-0.5">
-                {choices.map((o) => (
+                {[...choices, ...customChoices(s.outbounds)].map((o) => (
                   <button
                     key={o}
                     type="button"
@@ -697,7 +819,7 @@ function CountriesCard({ s, edit }: CardProps) {
                     onClick={() => edit((d) => (d.presets.countries[i].outbound = o))}
                     className={'rounded-lg px-2.5 py-1 text-xs transition ' + (c.outbound === o ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:text-foreground')}
                   >
-                    {t(`routing.outbound.${o}`)}
+                    {outLabel(o)}
                   </button>
                 ))}
               </div>
@@ -734,6 +856,118 @@ function CountriesCard({ s, edit }: CardProps) {
         </Select>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">{t('routing.countriesOrder')}</p>
+    </Section>
+  )
+}
+
+function OutboundsCard({ s, edit }: CardProps) {
+  const { t } = useTranslation()
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [link, setLink] = useState('')
+  const [checks, setChecks] = useState<Record<string, { trace?: Trace; error?: string } | 'busy'>>({})
+  const check = async (id: string) => {
+    setChecks((c) => ({ ...c, [id]: 'busy' }))
+    try {
+      const r = await api.routing.checkOutbound(id)
+      setChecks((c) => ({ ...c, [id]: r }))
+    } catch {
+      setChecks((c) => ({ ...c, [id]: { error: t('common.error') } }))
+    }
+  }
+  const used = (id: string) =>
+    s.rules.some((r) => r.outbound === `out:${id}`) || s.presets.countries.some((c) => c.outbound === `out:${id}`)
+
+  return (
+    <Section
+      icon={<Waypoints className="h-5 w-5" />}
+      title={t('routing.outs')}
+      hint={t('routing.outsHint')}
+      actions={
+        !adding && (
+          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+            <Plus className="h-4 w-4" />
+            {t('routing.outsAdd')}
+          </Button>
+        )
+      }
+    >
+      {s.outbounds.length === 0 && !adding && <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">{t('routing.outsEmpty')}</p>}
+      {s.outbounds.length > 0 && (
+        <ul className="divide-y rounded-xl border">
+          {s.outbounds.map((o, i) => {
+            const st = o.id ? checks[o.id] : undefined
+            return (
+              <li key={o.id || `new-${i}`} className="p-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">{o.name}</div>
+                    <div className="truncate font-mono text-xs text-muted-foreground">{o.summary || t('routing.outsUnsaved')}</div>
+                  </div>
+                  {o.id && (
+                    <Button variant="ghost" size="sm" disabled={st === 'busy'} onClick={() => check(o.id)}>
+                      {st === 'busy' ? t('routing.checking') : t('routing.check')}
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t('common.delete')}
+                    title={used(o.id) ? t('routing.outsInUse') : t('common.delete')}
+                    disabled={Boolean(o.id) && used(o.id)}
+                    onClick={() => edit((d) => d.outbounds.splice(i, 1))}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                {st && st !== 'busy' && (
+                  <p className={'mt-1.5 text-xs ' + (st.trace ? 'text-muted-foreground' : 'text-destructive')}>
+                    {st.trace ? `${st.trace.ip} · ${st.trace.country} · ${st.trace.latencyMs} ms` : t('routing.checkFailedOut', { error: st.error ?? '' })}
+                  </p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {adding && (
+        <div className="mt-3 space-y-3 rounded-xl bg-muted/60 p-3.5">
+          <Field label={t('routing.outsName')}>
+            {(id) => <Input id={id} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={t('routing.outsNamePlaceholder')} />}
+          </Field>
+          <Field label={t('routing.outsLink')} hint={t('routing.outsLinkHint')}>
+            {(id) => (
+              <textarea
+                id={id}
+                rows={3}
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+                spellCheck={false}
+                placeholder="vless://…  trojan://…  ss://…  socks5://user:pass@host:port"
+                className="w-full rounded-xl border border-input bg-card px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            )}
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setAdding(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!name.trim() || !link.trim()}
+              onClick={() => {
+                edit((d) => d.outbounds.push({ id: '', name: name.trim(), summary: '', link: link.trim() }))
+                setName('')
+                setLink('')
+                setAdding(false)
+              }}
+            >
+              {t('routing.ruleDone')}
+            </Button>
+          </div>
+        </div>
+      )}
+      {s.outbounds.length > 0 && <p className="mt-3 text-xs text-muted-foreground">{t('routing.outsUseHint')}</p>}
     </Section>
   )
 }

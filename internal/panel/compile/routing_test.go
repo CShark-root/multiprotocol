@@ -277,3 +277,70 @@ func TestWarpBridgeWithoutRules(t *testing.T) {
 		t.Fatalf("no bridge:\n%s", cfg)
 	}
 }
+
+func TestExtraDNS(t *testing.T) {
+	rt := testRouting(t, func(s *routing.Settings) {
+		s.DNS.Extra = []routing.DNSExtra{{Server: "yandex", Domains: []string{"domain:ru", "geosite:category-ru", "geosite:missing"}}}
+		s.DNS.Hosts = []routing.DNSHost{{Name: "router.lan", IP: "192.168.1.1"}}
+		s.DNS.DisableFallbackIfMatch = true
+	})
+	rt.DNS = dnsAvailable(rt.DNS, func(e string) bool { return e == "geosite:category-ru" })
+	rt.Sites["category-ru"] = geo.Site{Domains: []geo.Domain{{Kind: geo.KindSuffix, Value: "ya.ru"}}}
+	x, _ := Xray([]store.Inbound{inbound(1, "xhttp")}, nil, "127.0.0.1:1", rt)
+	for _, want := range []string{`"address": "77.88.8.8"`, `"geosite:category-ru"`, `"disableFallbackIfMatch": true`, `"router.lan": "192.168.1.1"`} {
+		if !strings.Contains(string(x), want) {
+			t.Errorf("xray: missing %s", want)
+		}
+	}
+	if strings.Contains(string(x), "geosite:missing") {
+		t.Error("an unknown category must not reach Xray")
+	}
+	sb, _ := SingBox([]store.Inbound{sbInbound()}, []store.User{{ID: 7, UUID: "u"}}, rt)
+	for _, want := range []string{`"tag": "dns-1"`, `"server": "77.88.8.8"`, `"ya.ru"`, `"type": "hosts"`} {
+		if !strings.Contains(string(sb), want) {
+			t.Errorf("sing-box: missing %s", want)
+		}
+	}
+	// Validation: an extra server needs domains, hosts need real addresses.
+	s := routing.Defaults()
+	s.DNS.Extra = []routing.DNSExtra{{Server: "yandex"}}
+	if _, err := routing.Normalize(s, func(int64) bool { return true }); err == nil {
+		t.Error("accepted an extra server without domains")
+	}
+	s.DNS.Extra = nil
+	s.DNS.Hosts = []routing.DNSHost{{Name: "a.lan", IP: "nope"}}
+	if _, err := routing.Normalize(s, func(int64) bool { return true }); err == nil {
+		t.Error("accepted a bad hosts address")
+	}
+}
+
+func TestCustomOutbound(t *testing.T) {
+	s := routing.Defaults()
+	s.Outbounds = []routing.CustomOutbound{{ID: "ab12", Name: "Second VPS", Link: "socks5://u:p@5.6.7.8:1080",
+		Bridge: routing.Bridge{Port: 41000, User: "out", Password: "pw"}}}
+	s.Rules = []routing.Rule{{ID: "r", Enabled: true, Match: []string{"domain:example.com"}, Outbound: "out:ab12"},
+		{ID: "x", Enabled: true, Match: []string{"domain:gone.example"}, Outbound: "out:gone"}}
+	rt := NewRouting(s, "/geo", nil, nil, nil)
+	x, _ := Xray(nil, nil, "127.0.0.1:1", rt)
+	for _, want := range []string{`"tag": "out_ab12"`, `"protocol": "socks"`, `"tag": "bridge_out_ab12"`, `"outboundTag": "out_ab12"`} {
+		if !strings.Contains(string(x), want) {
+			t.Errorf("xray: missing %s", want)
+		}
+	}
+	if strings.Contains(string(x), "out_gone") {
+		t.Error("a rule naming a deleted exit must go direct")
+	}
+	hy, _ := Hysteria([]store.Inbound{hyInbound()}, nil, rt)
+	if !strings.Contains(string(hy), `"name": "out_ab12"`) || !strings.Contains(string(hy), "out_ab12(suffix:example.com)") {
+		t.Errorf("hysteria:\n%s", hy)
+	}
+	sb, _ := SingBox([]store.Inbound{sbInbound()}, []store.User{{ID: 7, UUID: "u"}}, rt)
+	if !strings.Contains(string(sb), `"tag": "out_ab12-u7"`) || !strings.Contains(string(sb), `"server_port": 41000`) {
+		t.Errorf("sing-box: no per-user exit")
+	}
+	// Rules may only name existing exits.
+	s.Rules = []routing.Rule{{ID: "r", Enabled: true, Match: []string{"x.com"}, Outbound: "out:nope"}}
+	if _, err := routing.Normalize(s, func(int64) bool { return true }); err == nil {
+		t.Error("accepted a rule to an unknown exit")
+	}
+}

@@ -116,6 +116,7 @@ func New(d Deps) http.Handler {
 					r.Post("/geo/update", s.updateGeo)
 					r.Get("/geo/codes", s.geoCodes)
 					r.Get("/geo/countries", s.geoCountries)
+					r.Post("/outbounds/{id}/check", s.checkOutbound)
 				})
 				r.Get("/stats/traffic", s.trafficStats)
 				r.Get("/account", s.account)

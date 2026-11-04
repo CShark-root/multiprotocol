@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"panel/internal/panel/outbound"
 	"panel/internal/panel/validate"
 )
 
@@ -125,6 +126,7 @@ var DNSUpstreams = map[string]string{
 	"google":     "https://8.8.8.8/dns-query",
 	"quad9":      "https://9.9.9.9/dns-query",
 	"adguard":    "https://94.140.14.140/dns-query", // unfiltered
+	"yandex":     "77.88.8.8",                       // plain DNS; answers Russian sites as seen from Russia
 }
 
 // DNS strategies.
@@ -138,6 +140,38 @@ type DNSSettings struct {
 	Upstream string `json:"upstream"` // a key of DNSUpstreams, "system" or "custom"
 	Custom   string `json:"custom"`   // https://host/dns-query or an IP (plain UDP)
 	Strategy string `json:"strategy"`
+
+	// Extra servers for some sites, e.g. Yandex DNS for Russian domains.
+	Extra []DNSExtra `json:"extra"`
+	// Expert flags (Xray); the defaults suit almost everyone.
+	DisableCache           bool      `json:"disableCache"`
+	DisableFallback        bool      `json:"disableFallback"`
+	DisableFallbackIfMatch bool      `json:"disableFallbackIfMatch"`
+	Parallel               bool      `json:"parallel"`
+	SystemHosts            bool      `json:"systemHosts"`
+	ClientIP               string    `json:"clientIp"` // EDNS client subnet hint
+	Hosts                  []DNSHost `json:"hosts"`
+}
+
+// DNSExtra resolves Domains (match entries: domain:, full:, geosite:...)
+// with Server (a key of DNSUpstreams, an https:// URL or an IP).
+type DNSExtra struct {
+	Server  string   `json:"server"`
+	Domains []string `json:"domains"`
+}
+
+// DNSHost is a fixed answer, like a line of /etc/hosts.
+type DNSHost struct {
+	Name string `json:"name"`
+	IP   string `json:"ip"`
+}
+
+// ResolveServer turns a preset key, URL or IP into a server.
+func ResolveServer(s string) (DNSServer, error) {
+	if u, ok := DNSUpstreams[s]; ok {
+		s = u
+	}
+	return ParseCustomDNS(s)
 }
 
 // Geo database sources.
@@ -175,6 +209,34 @@ type Settings struct {
 	DNS     DNSSettings  `json:"dns"`
 	Geo     GeoSettings  `json:"geo"`
 	Bridge  Bridge       `json:"bridge"`
+	// Outbounds are the admin's own exits (another server, a proxy).
+	Outbounds []CustomOutbound `json:"outbounds"`
+}
+
+// CustomOutbound is an exit given as a share link. Rules send traffic to
+// it as "out:<ID>". Hysteria and sing-box reach it through its own
+// loopback bridge into Xray, like WARP.
+type CustomOutbound struct {
+	ID     string `json:"id"` // short, letters and digits
+	Name   string `json:"name"`
+	Link   string `json:"link"`
+	Bridge Bridge `json:"bridge"`
+}
+
+// OutPrefix marks a rule outbound that names a custom exit.
+const OutPrefix = "out:"
+
+// OutTag is the core-side tag of a custom exit (no dashes: sing-box user
+// outbounds are "<tag>-u7").
+func OutTag(id string) string { return "out_" + id }
+
+func (s Settings) hasOutbound(o string) bool {
+	id, ok := strings.CutPrefix(o, OutPrefix)
+	return ok && slices.ContainsFunc(s.Outbounds, func(c CustomOutbound) bool { return c.ID == id })
+}
+
+func (s Settings) validOutbound(o string) bool {
+	return slices.Contains(outbounds, o) || s.hasOutbound(o)
 }
 
 // Defaults are what a fresh panel starts with: the protective presets on,
@@ -269,6 +331,9 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 	if len(s.Rules) > 200 {
 		return s, validate.Fail("rules", "too many rules")
 	}
+	if err := normalizeOutbounds(&s); err != nil {
+		return s, err
+	}
 	seen := map[string]bool{}
 	for i := range s.Rules {
 		r := &s.Rules[i]
@@ -321,8 +386,8 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 				return s, validate.Fail(field+".users", "unknown user")
 			}
 		}
-		if !slices.Contains(outbounds, r.Outbound) {
-			return s, validate.Fail(field+".outbound", "direct, block, warp or ipv4")
+		if !s.validOutbound(r.Outbound) {
+			return s, validate.Fail(field+".outbound", "direct, block, warp, ipv4 or one of your exits")
 		}
 		if len(r.Match) == 0 && r.Ports == "" && r.Network == "" && len(r.Protocols) == 0 && len(r.Users) == 0 {
 			return s, validate.Fail(field+".match", "the rule matches nothing")
@@ -348,8 +413,8 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 		if !countryRe.MatchString(c.Code) && c.Code != RuBlocked || seenCountry[c.Code] {
 			return s, validate.Fail("presets.countries", "bad or repeated country: "+c.Code)
 		}
-		if !slices.Contains(outbounds, c.Outbound) {
-			return s, validate.Fail("presets.countries", "direct, block, warp or ipv4")
+		if !s.validOutbound(c.Outbound) {
+			return s, validate.Fail("presets.countries", "direct, block, warp, ipv4 or one of your exits")
 		}
 		seenCountry[c.Code] = true
 		s.Presets.Countries[i] = c
@@ -374,6 +439,9 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 		}
 	} else {
 		s.DNS.Custom = ""
+	}
+	if err := normalizeDNSExtra(&s.DNS); err != nil {
+		return s, err
 	}
 	switch s.DNS.Strategy {
 	case PreferIPv4, OnlyIPv4, BothIPs:
@@ -467,7 +535,7 @@ func (s Settings) Expand(email func(int64) string, has func(entry string) bool) 
 	defer func() { rules = available(rules, has) }()
 	warp := s.WarpUsable()
 	out := func(o string) string {
-		if o == WARP && !warp {
+		if o == WARP && !warp || strings.HasPrefix(o, OutPrefix) && !s.hasOutbound(o) {
 			return Direct
 		}
 		return o
@@ -584,4 +652,102 @@ func available(rules []Final, has func(string) bool) []Final {
 		}
 	}
 	return out
+}
+
+func normalizeDNSExtra(d *DNSSettings) error {
+	if d.Extra == nil {
+		d.Extra = []DNSExtra{}
+	}
+	if d.Hosts == nil {
+		d.Hosts = []DNSHost{}
+	}
+	if len(d.Extra) > 20 || len(d.Hosts) > 200 {
+		return validate.Fail("dns.extra", "too many entries")
+	}
+	for i := range d.Extra {
+		e := &d.Extra[i]
+		e.Server = strings.TrimSpace(e.Server)
+		if _, err := ResolveServer(e.Server); err != nil {
+			return validate.Fail("dns.extra", "server: a preset, https://host/dns-query or an IP")
+		}
+		var domains []string
+		for _, m := range e.Domains {
+			if strings.TrimSpace(m) == "" {
+				continue
+			}
+			n, ok := NormalizeMatch(m)
+			if !ok || strings.HasPrefix(n, "geoip:") || !strings.Contains(n, ":") {
+				return validate.Fail("dns.extra", "domains only (example.ru, geosite:category-ru): "+m)
+			}
+			if !slices.Contains(domains, n) {
+				domains = append(domains, n)
+			}
+		}
+		if len(domains) == 0 {
+			return validate.Fail("dns.extra", "each extra server needs at least one domain")
+		}
+		e.Domains = domains
+	}
+	for i := range d.Hosts {
+		h := &d.Hosts[i]
+		h.Name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h.Name)), ".")
+		h.IP = strings.TrimSpace(h.IP)
+		if !domainRe.MatchString(h.Name) {
+			return validate.Fail("dns.hosts", "bad name: "+h.Name)
+		}
+		if _, err := netip.ParseAddr(h.IP); err != nil {
+			return validate.Fail("dns.hosts", "bad address for "+h.Name)
+		}
+	}
+	d.ClientIP = strings.TrimSpace(d.ClientIP)
+	if d.ClientIP != "" {
+		if _, err := netip.ParseAddr(d.ClientIP); err != nil {
+			return validate.Fail("dns.clientIp", "an IP address or empty")
+		}
+	}
+	return nil
+}
+
+// DNSGeoNames lists geosite categories the extra DNS servers refer to.
+func (d DNSSettings) DNSGeoNames() []string {
+	var out []string
+	for _, e := range d.Extra {
+		for _, m := range e.Domains {
+			if v, ok := strings.CutPrefix(m, "geosite:"); ok {
+				v, _, _ = strings.Cut(v, "@")
+				if !slices.Contains(out, v) {
+					out = append(out, v)
+				}
+			}
+		}
+	}
+	return out
+}
+
+var outIDRe = regexp.MustCompile(`^[a-z0-9]{1,12}$`)
+
+func normalizeOutbounds(s *Settings) error {
+	if s.Outbounds == nil {
+		s.Outbounds = []CustomOutbound{}
+	}
+	if len(s.Outbounds) > 20 {
+		return validate.Fail("outbounds", "at most 20 exits")
+	}
+	seen := map[string]bool{}
+	for i := range s.Outbounds {
+		o := &s.Outbounds[i]
+		o.Name = strings.TrimSpace(o.Name)
+		o.Link = strings.TrimSpace(o.Link)
+		if !outIDRe.MatchString(o.ID) || seen[o.ID] {
+			return validate.Fail("outbounds", "bad exit id")
+		}
+		seen[o.ID] = true
+		if o.Name == "" || len(o.Name) > 40 {
+			return validate.Fail("outbounds.name", "1-40 characters")
+		}
+		if _, err := outbound.Parse(o.Link); err != nil {
+			return validate.Fail("outbounds.link", err.Error())
+		}
+	}
+	return nil
 }

@@ -77,7 +77,8 @@ export type UserInput = {
 export type OnlineEntry = { userId: number; ips: string[]; connections: number }
 export type DayTraffic = { day: string; bytes: number }
 
-export type Outbound = 'direct' | 'block' | 'warp' | 'ipv4'
+export type Outbound = 'direct' | 'block' | 'warp' | 'ipv4' | `out:${string}`
+export type CustomOut = { id: string; name: string; summary: string; link?: string }
 export type CoreSupport = 'full' | 'partial' | 'none'
 export type RoutingRule = {
   id: string
@@ -105,9 +106,22 @@ export type RoutingSettings = {
   presets: RoutingPresets
   rules: RoutingRule[]
   warp: { mode: WarpMode; registered: boolean; warpPlus: boolean; address4?: string; address6?: string; endpoint?: string; registeredAt?: string }
-  dns: { upstream: string; custom: string; strategy: 'prefer4' | 'ipv4' | 'both' }
+  dns: {
+    upstream: string
+    custom: string
+    strategy: 'prefer4' | 'ipv4' | 'both'
+    extra: { server: string; domains: string[] }[]
+    disableCache?: boolean
+    disableFallback?: boolean
+    disableFallbackIfMatch?: boolean
+    parallel?: boolean
+    systemHosts?: boolean
+    clientIp?: string
+    hosts?: { name: string; ip: string }[]
+  }
   geo: { source: 'loyalsoldier' | 'runetfreedom' | 'custom'; geoipUrl: string; geositeUrl: string; autoUpdate: boolean }
   services: string[]
+  outbounds: CustomOut[]
   geoState: { lastCheck: string; lastUpdate: string; lastError: string; lastSource: string; files: { name: string; size: number; modified: string }[] }
 }
 export type Trace = { ip: string; country: string; warp: string; latencyMs: number }
@@ -398,10 +412,12 @@ export const api = {
         warp: { mode: s.warp.mode },
         dns: s.dns,
         geo: s.geo,
+        outbounds: s.outbounds.map(({ id, name, link }) => ({ id, name, link: link ?? '' })),
       }),
     registerWarp: () => request<RoutingSettings>('POST', 'routing/warp', {}),
     warpLicense: (license: string) => request<RoutingSettings>('POST', 'routing/warp/license', { license }),
     deleteWarp: () => request<RoutingSettings>('DELETE', 'routing/warp'),
+    checkOutbound: (id: string) => request<{ trace?: Trace; error?: string }>('POST', `routing/outbounds/${id}/check`, {}),
     checkWarp: () => request<{ direct: Trace; warp?: Trace; error?: string }>('POST', 'routing/warp/check', {}),
     updateGeo: () => request<{ changed: boolean }>('POST', 'routing/geo/update', {}),
     geoCountries: () => request<{ countries: { code: string; hasSite: boolean }[]; ruBlocked: boolean }>('GET', 'routing/geo/countries'),
