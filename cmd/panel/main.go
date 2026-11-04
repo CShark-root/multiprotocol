@@ -112,8 +112,12 @@ func serve(args []string) int {
 		scheme = "http"
 	}
 	subBase := fmt.Sprintf("%s://%s/%s/", scheme, net.JoinHostPort(cfg.PublicHost, portStr), cfg.SubPath)
-	if *dev {
+	lanSub := !*dev && cfg.LANOnly() && cfg.LANSubPort > 0
+	switch {
+	case *dev:
 		subBase = fmt.Sprintf("http://%s/%s/", cfg.Listen, cfg.SubPath)
+	case lanSub:
+		subBase = fmt.Sprintf("http://%s/%s/", net.JoinHostPort(cfg.PublicHost, strconv.Itoa(cfg.LANSubPort)), cfg.SubPath)
 	}
 
 	handler := api.New(api.Deps{
@@ -128,6 +132,7 @@ func serve(args []string) int {
 		TLS:        !*dev,
 		PublicHost: cfg.PublicHost,
 		SubBaseURL: subBase,
+		SubOverLAN: lanSub,
 	})
 	sub := api.NewSubscription(api.SubscriptionDeps{
 		SubPath: cfg.SubPath, Store: st, PublicHost: cfg.PublicHost, Decoy: cfg.Decoy,
@@ -176,12 +181,34 @@ func serve(args []string) int {
 		}
 	}
 
+	// Test VMs only: the subscription (never the panel) over plain HTTP, see
+	// config.LANSubPort.
+	var lanSrv *http.Server
+	if lanSub {
+		lanSrv = &http.Server{
+			Addr:              ":" + strconv.Itoa(cfg.LANSubPort),
+			Handler:           stealth.Gate(cfg.Decoy, map[string]http.Handler{cfg.SubPath: sub}),
+			ReadHeaderTimeout: 10 * time.Second,
+			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelDebug),
+		}
+		log.Warn("serving subscriptions over plain HTTP because the public host is a LAN address (test setup)",
+			"port", cfg.LANSubPort)
+		go func() {
+			if err := lanSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("lan subscription listener", "err", err)
+			}
+		}()
+	}
+
 	go pruneSessions(ctx, authSvc, log)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdownCtx)
+		if lanSrv != nil {
+			lanSrv.Shutdown(shutdownCtx)
+		}
 	}()
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("serve", "err", err)

@@ -33,6 +33,7 @@ type Deps struct {
 	TLS        bool   // served over HTTPS: Secure cookies and HSTS
 	PublicHost string // host clients connect to, for share links
 	SubBaseURL string // e.g. https://203.0.113.5:41582/<subPath>/
+	SubOverLAN bool   // subscriptions are served over plain HTTP on a LAN test setup
 }
 
 type server struct {

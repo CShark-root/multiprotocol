@@ -215,7 +215,7 @@ function InboundFacts({ ib }: { ib: Inbound }) {
   if (certProtocols.includes(ib.protocol)) facts.push([t('inbounds.hySni'), ib.serverName])
   if (ib.protocol === 'shadowtls') facts.push([t('inbounds.handshake'), ib.target?.replace(/:443$/, '') ?? ''])
   if (ib.address) facts.push([t('inbounds.address'), ib.address])
-  if (!facts.length) return null
+  facts.push([t('inbounds.appsLabel'), ib.apps.map((a) => t(`inbounds.apps.${a}Short`)).join(', ')])
   return (
     <dl className="mt-4 space-y-1.5 text-sm">
       {facts.map(([k, v]) => (
@@ -338,6 +338,9 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                     {proto === 'vmess' && <Badge tone="warning">{t('inbounds.weak')}</Badge>}
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">{t(`inbounds.protocols.${proto}.text`)}</div>
+                  <div className="mt-1.5 text-[11px] font-medium text-accent-foreground">
+                    {t('connect.worksIn', { apps: protocolSpecs[proto].apps.map((a) => t(`inbounds.apps.${a}Short`)).join(', ') })}
+                  </div>
                 </button>
               ))}
             </div>

@@ -40,6 +40,18 @@ type Config struct {
 	// share links. Detected on first start; edit it if the server sits
 	// behind NAT.
 	PublicHost string `json:"publicHost"`
+	// LANSubPort serves subscriptions over plain HTTP, and only while
+	// PublicHost is a private LAN address (a test VM): phone apps reject the
+	// self-signed certificate, and inside a home network there is no way to
+	// get a real one. Never used on a public address.
+	LANSubPort int `json:"lanSubPort,omitempty"`
+}
+
+// LANOnly reports whether clients reach the server by a private address,
+// i.e. it is a test machine inside a home network.
+func (c Config) LANOnly() bool {
+	ip := net.ParseIP(c.PublicHost)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback())
 }
 
 var (
@@ -105,6 +117,11 @@ func (c *Config) fillDefaults() (changed bool) {
 	}
 	if c.PublicHost == "" {
 		c.PublicHost, changed = DetectPublicHost(), true
+	}
+	if c.LANOnly() && c.LANSubPort == 0 {
+		if port, err := randomFreePort(20000, 60000); err == nil {
+			c.LANSubPort, changed = port, true
+		}
 	}
 	return changed
 }

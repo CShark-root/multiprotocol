@@ -53,6 +53,30 @@ func Spec(protocol string) (ProtocolSpec, bool) {
 // Networks lists the port families an inbound of this protocol occupies.
 func Networks(protocol string) []string { return protocols[protocol].Networks }
 
+// Client app families, by the core inside the app:
+//   - "xray": Happ, v2RayTun, v2rayNG, v2rayN, Streisand;
+//   - "singbox": sing-box, Hiddify, NekoBox.
+const (
+	AppsXray    = "xray"
+	AppsSingBox = "singbox"
+)
+
+// ClientApps says which app families can connect to an inbound. VLESS and
+// Trojan are Xray-only: sing-box has no XHTTP, and sing-box 1.14 clients
+// fail Reality verification against Xray 26 servers (tested on the VM). TUIC,
+// AnyTLS and ShadowTLS are sing-box protocols.
+func ClientApps(protocol string) []string {
+	switch protocol {
+	case "vless", "trojan":
+		return []string{AppsXray}
+	case "shadowsocks", "vmess", "hysteria2":
+		return []string{AppsXray, AppsSingBox}
+	case "tuic", "anytls", "shadowtls":
+		return []string{AppsSingBox}
+	}
+	return nil
+}
+
 // SS2022Method is the only Shadowsocks cipher offered: modern, multi-user,
 // with replay protection.
 const SS2022Method = "2022-blake3-aes-128-gcm"

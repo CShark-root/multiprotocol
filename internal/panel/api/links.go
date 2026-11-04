@@ -7,17 +7,19 @@ import (
 	"strings"
 
 	"panel/internal/panel/config"
+	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
 	"panel/internal/panel/store"
 	"panel/internal/panel/subscription"
 )
 
 type linkDTO struct {
-	InboundID int64  `json:"inboundId"`
-	Remark    string `json:"remark"`
-	Protocol  string `json:"protocol"`
-	Transport string `json:"transport"`
-	URL       string `json:"url"` // "" when the protocol has no share-link format
+	InboundID int64    `json:"inboundId"`
+	Remark    string   `json:"remark"`
+	Protocol  string   `json:"protocol"`
+	Transport string   `json:"transport"`
+	Apps      []string `json:"apps"` // client app families that can use it
+	URL       string   `json:"url"`  // "" when the protocol has no share-link format
 }
 
 func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +42,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 		if ib.Enabled {
 			links = append(links, linkDTO{
 				InboundID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport,
-				URL: subscription.Link(ib, u, s.PublicHost),
+				Apps: service.ClientApps(ib.Protocol), URL: subscription.Link(ib, u, s.PublicHost),
 			})
 		}
 	}
@@ -48,6 +50,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"subscriptionUrl": sub,
 		"singboxUrl":      sub + "?format=singbox",
+		"overLan":         s.SubOverLAN, // plain HTTP, test VM only
 		"links":           links,
 	})
 }

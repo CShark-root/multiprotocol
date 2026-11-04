@@ -20,6 +20,7 @@ type inboundDTO struct {
 	Security  string    `json:"security"`
 	Network   string    `json:"network"` // tcp | udp | tcp+udp
 	Core      string    `json:"core"`    // xray | hysteria | singbox
+	Apps      []string  `json:"apps"`    // client app families: xray, singbox
 	TestKit   bool      `json:"testKit"`
 	Port      int       `json:"port"`
 	Address   string    `json:"address"`
@@ -69,7 +70,7 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	spec, _ := service.Spec(ib.Protocol)
 	d := inboundDTO{
 		ID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
-		Network: strings.Join(spec.Networks, "+"), Core: spec.Core, TestKit: ib.TestKit,
+		Network: strings.Join(spec.Networks, "+"), Core: spec.Core, Apps: service.ClientApps(ib.Protocol), TestKit: ib.TestKit,
 		Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled, CreatedAt: ib.CreatedAt,
 	}
 	if r := ib.Settings.Reality; r != nil {

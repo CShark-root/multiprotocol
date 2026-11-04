@@ -77,16 +77,22 @@ export type CoreHealth = { name: string; installed: boolean; running: boolean; v
 export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
 export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'ws' | 'quic'
 
+/** Client app families, by the core inside the app (see service.ClientApps). */
+export type AppFamily = 'xray' | 'singbox'
+
 /** What the wizard offers per protocol; mirrors the server's protocol registry. */
-export const protocolSpecs: Record<Protocol, { transports: Transport[]; core: 'xray' | 'hysteria' | 'singbox'; network: string }> = {
-  vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp' },
-  trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp' },
-  shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp' },
-  vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp' },
-  hysteria2: { transports: ['quic'], core: 'hysteria', network: 'udp' },
-  tuic: { transports: ['quic'], core: 'singbox', network: 'udp' },
-  anytls: { transports: ['tcp'], core: 'singbox', network: 'tcp' },
-  shadowtls: { transports: ['tcp'], core: 'singbox', network: 'tcp' },
+export const protocolSpecs: Record<
+  Protocol,
+  { transports: Transport[]; core: 'xray' | 'hysteria' | 'singbox'; network: string; apps: AppFamily[] }
+> = {
+  vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray'] },
+  trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray'] },
+  shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp', apps: ['xray', 'singbox'] },
+  vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp', apps: ['xray', 'singbox'] },
+  hysteria2: { transports: ['quic'], core: 'hysteria', network: 'udp', apps: ['xray', 'singbox'] },
+  tuic: { transports: ['quic'], core: 'singbox', network: 'udp', apps: ['singbox'] },
+  anytls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['singbox'] },
+  shadowtls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['singbox'] },
 }
 export const protocolOrder = Object.keys(protocolSpecs) as Protocol[]
 
@@ -98,6 +104,7 @@ export type Inbound = {
   security: string
   network: string // tcp | udp | tcp+udp
   core: 'xray' | 'hysteria' | 'singbox'
+  apps: AppFamily[]
   testKit: boolean
   wsPath?: string
   port: number
@@ -151,7 +158,8 @@ export type InboundSuggest = {
 export type UserLinks = {
   subscriptionUrl: string
   singboxUrl: string
-  links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; url: string }[]
+  overLan: boolean
+  links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; apps: AppFamily[]; url: string }[]
 }
 
 export type SystemInfo = {

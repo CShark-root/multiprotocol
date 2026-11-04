@@ -178,8 +178,23 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
           {user.status !== 'active' && (
             <p className="rounded-xl bg-warning-soft px-3.5 py-2.5 text-sm text-warning">{t('connect.disabledUser')}</p>
           )}
-          <ShareRow label={t('connect.subscription')} hint={t('connect.subscriptionHint')} text={links.data.subscriptionUrl} />
-          <ShareRow label={t('connect.singbox')} hint={t('connect.singboxHint')} text={links.data.singboxUrl} />
+          {(() => {
+            // Which methods each subscription carries, named the way the admin named them.
+            const names = (family: 'xray' | 'singbox') =>
+              links.data.links
+                .filter((l) => l.apps.includes(family) && (family === 'singbox' || l.url))
+                .map((l) => l.remark)
+                .join(', ') || '—'
+            return (
+              <div className="space-y-2">
+                <div className="text-sm font-medium">{t('connect.subscriptions')}</div>
+                <p className="-mt-1 text-xs text-muted-foreground">{t('connect.subscriptionsHint')}</p>
+                {links.data.overLan && <p className="rounded-xl bg-accent px-3.5 py-2.5 text-xs text-accent-foreground">{t('connect.overLan')}</p>}
+                <ShareRow label={t('connect.subXray')} hint={t('connect.subXrayHint', { list: names('xray') })} text={links.data.subscriptionUrl} />
+                <ShareRow label={t('connect.subSingbox')} hint={t('connect.subSingboxHint', { list: names('singbox') })} text={links.data.singboxUrl} />
+              </div>
+            )
+          })()}
           <div>
             <div className="text-sm font-medium">{t('connect.links')}</div>
             <p className="mb-2 text-xs text-muted-foreground">{t('connect.linksHint')}</p>
@@ -193,8 +208,9 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                   const kind = kindLabel(l.protocol, l.transport)
                   const named = l.remark.toLowerCase().includes(t(`inbounds.protocols.${l.protocol}.title`).split(' ')[0].toLowerCase())
                   const label = named ? l.remark : `${l.remark} · ${kind}`
+                  const works = t('connect.worksIn', { apps: l.apps.map((a) => t(`inbounds.apps.${a}`)).join('; ') })
                   return l.url ? (
-                    <ShareRow key={l.inboundId} label={label} text={l.url} />
+                    <ShareRow key={l.inboundId} label={label} hint={works} text={l.url} />
                   ) : (
                     <div key={l.inboundId} className="rounded-xl border border-dashed p-3.5">
                       <div className="text-sm font-medium">{label}</div>
