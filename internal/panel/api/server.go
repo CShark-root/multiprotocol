@@ -103,6 +103,7 @@ func New(d Deps) http.Handler {
 					r.Delete("/warp", s.deleteWarp)
 					r.Post("/geo/update", s.updateGeo)
 					r.Get("/geo/codes", s.geoCodes)
+					r.Get("/geo/countries", s.geoCountries)
 				})
 				r.Get("/stats/traffic", s.trafficStats)
 				r.Get("/account", s.account)

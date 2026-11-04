@@ -36,7 +36,7 @@ func testRouting(t *testing.T, mut func(*routing.Settings)) Routing {
 		"category-ads-all": {Domains: []geo.Domain{{Kind: geo.KindSuffix, Value: "ads.example", Attrs: []string{"ads"}}}},
 	}
 	ips := map[string][]netip.Prefix{"ru": {netip.MustParsePrefix("5.8.0.0/16")}}
-	return NewRouting(s, "/geo", sites, ips)
+	return NewRouting(s, "/geo", nil, sites, ips)
 }
 
 func TestXrayRouting(t *testing.T) {
@@ -226,5 +226,41 @@ func TestRoutingNormalize(t *testing.T) {
 		if _, err := routing.Normalize(s, ok); err == nil {
 			t.Errorf("accepted %+v", bad)
 		}
+	}
+}
+
+func TestCountriesAndMissingCategories(t *testing.T) {
+	s := routing.Defaults()
+	s.Presets.Countries = []routing.CountryRule{{Code: "ru", Outbound: routing.WARP}, {Code: "zz", Outbound: routing.Block}}
+	s.WARP = routing.WarpSettings{Mode: routing.WarpRules, Account: &routing.WarpAccount{Endpoint: "162.159.192.1:2408"}}
+	s.Bridge = routing.Bridge{Port: 40000, User: "u", Password: "p"}
+	s.Rules = []routing.Rule{{ID: "x", Enabled: true, Match: []string{"geosite:typo-category"}, Outbound: routing.Block}}
+	// The database has Russia's IP ranges and sites but nothing for "zz"
+	// and no "typo-category".
+	has := func(e string) bool { return e == "geoip:ru" || e == "geosite:category-ru" }
+	rt := NewRouting(s, "/geo", has, nil, nil)
+	var names []string
+	for _, r := range rt.Rules {
+		names = append(names, r.Name)
+	}
+	if !slices.Contains(names, "country:ru") || slices.Contains(names, "country:zz") || slices.Contains(names, "") {
+		t.Fatalf("rules: %v", names)
+	}
+	cfg, err := Xray([]store.Inbound{inbound(1, "xhttp")}, nil, "127.0.0.1:1", rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"geosite:category-ru"`, `"geoip:ru"`} {
+		if !strings.Contains(string(cfg), want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	if strings.Contains(string(cfg), "typo-category") || strings.Contains(string(cfg), "geoip:zz") {
+		t.Error("unknown categories must not reach Xray: it would refuse to start")
+	}
+	// Country codes are validated.
+	s.Presets.Countries = []routing.CountryRule{{Code: "russia", Outbound: routing.WARP}}
+	if _, err := routing.Normalize(s, func(int64) bool { return true }); err == nil {
+		t.Error("accepted a bad country code")
 	}
 }

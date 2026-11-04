@@ -119,6 +119,7 @@ export function RoutingPage() {
               ))}
             </div>
           </Section>
+          <CountriesCard s={s} edit={edit} />
           <WarpCard s={s} edit={edit} onServer={accept} />
         </div>
         <div className="space-y-4">
@@ -637,6 +638,102 @@ function GeoCard({ s, edit }: CardProps) {
         </div>
         <p className="text-xs text-muted-foreground">{t('routing.geoSaveFirst')}</p>
       </div>
+    </Section>
+  )
+}
+
+function flag(code: string) {
+  if (code.length !== 2) return '🌐'
+  return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+}
+
+function CountriesCard({ s, edit }: CardProps) {
+  const { t, i18n } = useTranslation()
+  const countries = useQuery({ queryKey: ['geoCountries'], queryFn: api.routing.geoCountries, staleTime: 5 * 60_000 })
+  const [adding, setAdding] = useState('')
+  const names = useMemo(() => {
+    try {
+      return new Intl.DisplayNames([i18n.language], { type: 'region' })
+    } catch {
+      return null
+    }
+  }, [i18n.language])
+  const label = (code: string) => (code === 'ru-blocked' ? t('routing.ruBlocked') : (names?.of(code.toUpperCase()) ?? code.toUpperCase()))
+  const list = s.presets.countries
+  const used = new Set(list.map((c) => c.code))
+  const options = (countries.data?.countries ?? [])
+    .filter((c) => !used.has(c.code))
+    .map((c) => ({ ...c, name: label(c.code) }))
+    .sort((a, b) => a.name.localeCompare(b.name, i18n.language))
+  const hasSite = (code: string) => code === 'ru-blocked' || countries.data?.countries.find((c) => c.code === code)?.hasSite
+  const warpOff = !s.warp.registered || s.warp.mode === 'off'
+  const add = (code: string, outbound: Outbound = 'warp') => edit((d) => d.presets.countries.push({ code, outbound }))
+  const choices: Outbound[] = ['direct', 'warp', 'block']
+
+  return (
+    <Section icon={<Globe className="h-5 w-5" />} title={t('routing.countries')} hint={t('routing.countriesHint')}>
+      {list.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed p-3.5">
+          <span className="text-sm text-muted-foreground">{t('routing.countriesEmpty')}</span>
+          <Button size="sm" variant="secondary" onClick={() => add('ru')}>
+            {flag('ru')} {t('routing.ruViaWarp')}
+          </Button>
+        </div>
+      ) : (
+        <ul className="divide-y rounded-xl border">
+          {list.map((c, i) => (
+            <li key={c.code} className="flex flex-wrap items-center gap-3 p-3">
+              <span className="text-lg leading-none">{flag(c.code)}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{label(c.code)}</div>
+                <div className="text-xs text-muted-foreground">{hasSite(c.code) ? t('routing.countrySitesAndIps') : t('routing.countryIpsOnly')}</div>
+              </div>
+              <div className="flex rounded-xl border p-0.5">
+                {choices.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    aria-pressed={c.outbound === o}
+                    onClick={() => edit((d) => (d.presets.countries[i].outbound = o))}
+                    className={'rounded-lg px-2.5 py-1 text-xs transition ' + (c.outbound === o ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:text-foreground')}
+                  >
+                    {t(`routing.outbound.${o}`)}
+                  </button>
+                ))}
+              </div>
+              <Button variant="ghost" size="icon" aria-label={t('common.delete')} onClick={() => edit((d) => d.presets.countries.splice(i, 1))}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {list.some((c) => c.outbound === 'warp') && warpOff && <p className="mt-3 rounded-xl bg-warning-soft px-3.5 py-2.5 text-xs text-warning">{t('routing.countriesWarpOff')}</p>}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Select
+          value={adding}
+          onChange={(e) => {
+            if (e.target.value) add(e.target.value)
+            setAdding('')
+          }}
+          className="max-w-xs"
+          aria-label={t('routing.addCountry')}
+        >
+          <option value="">{t('routing.addCountry')}</option>
+          {!used.has('ru-blocked') && (
+            <option value="ru-blocked" disabled={!countries.data?.ruBlocked}>
+              🚫 {t('routing.ruBlocked')}
+              {countries.data?.ruBlocked ? '' : ` (${t('routing.needsRunetfreedom')})`}
+            </option>
+          )}
+          {options.map((c) => (
+            <option key={c.code} value={c.code}>
+              {flag(c.code)} {c.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">{t('routing.countriesOrder')}</p>
     </Section>
   )
 }

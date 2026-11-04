@@ -96,6 +96,7 @@ export type RoutingPresets = {
   blockAds: boolean
   googleIpv4: boolean
   warpServices: string[]
+  countries: { code: string; outbound: Outbound }[]
 }
 export type WarpMode = 'off' | 'rules' | 'all'
 export type RoutingSettings = {
@@ -342,6 +343,7 @@ export const api = {
     deleteWarp: () => request<RoutingSettings>('DELETE', 'routing/warp'),
     checkWarp: () => request<{ direct: Trace; warp?: Trace; error?: string }>('POST', 'routing/warp/check', {}),
     updateGeo: () => request<{ changed: boolean }>('POST', 'routing/geo/update', {}),
+    geoCountries: () => request<{ countries: { code: string; hasSite: boolean }[]; ruBlocked: boolean }>('GET', 'routing/geo/countries'),
     geoCodes: (q: string) => request<string[]>('GET', 'routing/geo/codes?q=' + encodeURIComponent(q)),
   },
   trafficByDay: (days = 30) => request<DayTraffic[]>('GET', `stats/traffic?days=${days}`),

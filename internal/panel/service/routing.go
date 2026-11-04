@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,8 @@ type Routing struct {
 	cacheKey  string
 	cacheSite map[string]geo.Site
 	cacheIP   map[string][]netip.Prefix
+	codesKey  string
+	codes     map[string]bool // "geosite:openai", "geoip:ru" present in the databases
 }
 
 func NewRouting(st *store.Store, events *Events, geoDir string, changed func(), restart func() error, log *slog.Logger) *Routing {
@@ -296,9 +299,28 @@ func (r *Routing) Compile(ctx context.Context) (compile.Routing, error) {
 	if err != nil {
 		return compile.Routing{}, err
 	}
-	rules, _ := s.Expand(compile.Email)
+	files := r.fileKey()
+	r.mu.Lock()
+	if files != r.codesKey {
+		siteCodes, ipCodes := r.GeoCodes()
+		set := make(map[string]bool, len(siteCodes)+len(ipCodes))
+		for _, c := range siteCodes {
+			set["geosite:"+c] = true
+		}
+		for _, c := range ipCodes {
+			set["geoip:"+c] = true
+		}
+		r.codesKey, r.codes = files, set
+	}
+	codes := r.codes
+	r.mu.Unlock()
+	has := func(entry string) bool {
+		name, _, _ := strings.Cut(entry, "@")
+		return codes[name]
+	}
+	rules, _ := s.Expand(compile.Email, has)
 	sites, ips := routing.GeoNames(rules)
-	key := r.fileKey() + "|" + joinKey(sites, ips)
+	key := files + "|" + joinKey(sites, ips)
 	r.mu.Lock()
 	if key != r.cacheKey {
 		siteMap, err1 := geo.Sites(filepath.Join(r.geoDir, "geosite.dat"), sites)
@@ -313,7 +335,7 @@ func (r *Routing) Compile(ctx context.Context) (compile.Routing, error) {
 	}
 	siteMap, ipMap := r.cacheSite, r.cacheIP
 	r.mu.Unlock()
-	return compile.NewRouting(s, r.geoDir, siteMap, ipMap), nil
+	return compile.NewRouting(s, r.geoDir, has, siteMap, ipMap), nil
 }
 
 func joinKey(sites, ips []string) string {
@@ -352,4 +374,23 @@ func randomToken(n int) string {
 
 func (r *Routing) audit(ctx context.Context, adminID int64, action, targetType, targetID string, diff any) {
 	r.store.AddAudit(ctx, store.AuditEntry{AdminID: adminID, Action: action, TargetType: targetType, TargetID: targetID, Diff: diff}, r.now())
+}
+
+// Country is a country the geoip database knows, for the country picker.
+type Country struct {
+	Code    string `json:"code"`
+	HasSite bool   `json:"hasSite"` // a geosite category-<code> exists too
+}
+
+// Countries lists two-letter geoip codes and whether the ru-blocked lists
+// are installed.
+func (r *Routing) Countries() (list []Country, ruBlocked bool) {
+	sites, ips := r.GeoCodes()
+	list = []Country{}
+	for _, c := range ips {
+		if len(c) == 2 && c[0] >= 'a' && c[0] <= 'z' && c[1] >= 'a' && c[1] <= 'z' {
+			list = append(list, Country{Code: c, HasSite: slices.Contains(sites, "category-"+c)})
+		}
+	}
+	return list, slices.Contains(sites, routing.RuBlocked) || slices.Contains(ips, routing.RuBlocked)
 }

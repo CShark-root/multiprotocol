@@ -53,6 +53,27 @@ type Presets struct {
 	BlockAds        bool     `json:"blockAds"`
 	GoogleIPv4      bool     `json:"googleIpv4"`
 	WarpServices    []string `json:"warpServices"` // keys of Services
+	// Countries send a whole country (its sites and IP ranges) somewhere,
+	// e.g. Russia through WARP so Russian services never see the server IP.
+	Countries []CountryRule `json:"countries"`
+}
+
+// CountryRule is a country code ("ru") or RuBlocked, and where it goes.
+type CountryRule struct {
+	Code     string `json:"code"`
+	Outbound string `json:"outbound"`
+}
+
+// RuBlocked is the runetfreedom list of what is blocked in Russia.
+const RuBlocked = "ru-blocked"
+
+// CountryMatch is what a country rule matches: the country's site
+// category and its IP ranges.
+func CountryMatch(code string) []string {
+	if code == RuBlocked {
+		return []string{"geosite:ru-blocked", "geoip:ru-blocked"}
+	}
+	return []string{"geosite:category-" + code, "geoip:" + code}
 }
 
 // Service is a WARP preset: sites that refuse data-centre IPs or regions.
@@ -161,7 +182,7 @@ type Settings struct {
 // daily.
 func Defaults() Settings {
 	return Settings{
-		Presets: Presets{BlockPrivate: true, BlockSMTP: true, BlockBittorrent: true, WarpServices: []string{}},
+		Presets: Presets{BlockPrivate: true, BlockSMTP: true, BlockBittorrent: true, WarpServices: []string{}, Countries: []CountryRule{}},
 		Rules:   []Rule{},
 		WARP:    WarpSettings{Mode: WarpOff},
 		DNS:     DNSSettings{Upstream: "cloudflare", Strategy: PreferIPv4},
@@ -170,9 +191,10 @@ func Defaults() Settings {
 }
 
 var (
-	domainRe = regexp.MustCompile(`^(?i)[a-z0-9_]([a-z0-9_-]{0,62})(\.[a-z0-9_]([a-z0-9_-]{0,62}))*\.?$`)
-	geoRe    = regexp.MustCompile(`^[a-z0-9!_.-]{1,64}(@[a-z0-9!_-]{1,32})?$`)
-	portsRe  = regexp.MustCompile(`^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$`)
+	domainRe  = regexp.MustCompile(`^(?i)[a-z0-9_]([a-z0-9_-]{0,62})(\.[a-z0-9_]([a-z0-9_-]{0,62}))*\.?$`)
+	geoRe     = regexp.MustCompile(`^[a-z0-9!_.-]{1,64}(@[a-z0-9!_-]{1,32})?$`)
+	countryRe = regexp.MustCompile(`^[a-z]{2}$`)
+	portsRe   = regexp.MustCompile(`^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$`)
 )
 
 // NormalizeMatch cleans one match entry and reports whether it is valid.
@@ -314,6 +336,24 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 			return s, validate.Fail("presets.warpServices", "unknown service")
 		}
 	}
+	if s.Presets.Countries == nil {
+		s.Presets.Countries = []CountryRule{}
+	}
+	if len(s.Presets.Countries) > 60 {
+		return s, validate.Fail("presets.countries", "too many countries")
+	}
+	seenCountry := map[string]bool{}
+	for i, c := range s.Presets.Countries {
+		c.Code = strings.ToLower(strings.TrimSpace(c.Code))
+		if !countryRe.MatchString(c.Code) && c.Code != RuBlocked || seenCountry[c.Code] {
+			return s, validate.Fail("presets.countries", "bad or repeated country: "+c.Code)
+		}
+		if !slices.Contains(outbounds, c.Outbound) {
+			return s, validate.Fail("presets.countries", "direct, block, warp or ipv4")
+		}
+		seenCountry[c.Code] = true
+		s.Presets.Countries[i] = c
+	}
 	switch s.WARP.Mode {
 	case WarpOff, WarpRules, WarpAll:
 	case "":
@@ -423,7 +463,8 @@ func (s Settings) WarpUsable() bool { return s.WARP.Mode != WarpOff && s.WARP.Ac
 // (first match wins): protective blocks, the admin's rules, then the
 // service presets. Rules sending to WARP fall back to direct while WARP is
 // off or not registered. The final (catch-all) outbound is returned apart.
-func (s Settings) Expand(email func(int64) string) (rules []Final, final string) {
+func (s Settings) Expand(email func(int64) string, has func(entry string) bool) (rules []Final, final string) {
+	defer func() { rules = available(rules, has) }()
 	warp := s.WarpUsable()
 	out := func(o string) string {
 		if o == WARP && !warp {
@@ -456,6 +497,10 @@ func (s Settings) Expand(email func(int64) string) (rules []Final, final string)
 			continue
 		}
 		rules = append(rules, f)
+	}
+	for _, c := range p.Countries {
+		name := "country:" + c.Code
+		rules = append(rules, Final{Name: name, Match: CountryMatch(c.Code), Outbound: out(c.Outbound)})
 	}
 	if warp {
 		for _, sv := range Services {
@@ -512,4 +557,31 @@ func (r Rule) Support() Support {
 		}
 	}
 	return s
+}
+
+// available drops geo entries the installed databases do not have (Xray
+// and Hysteria refuse to start on an unknown category) and rules left with
+// nothing to match. has == nil means "everything is available".
+func available(rules []Final, has func(string) bool) []Final {
+	if has == nil {
+		return rules
+	}
+	out := rules[:0:0]
+	for _, r := range rules {
+		if len(r.Match) == 0 {
+			out = append(out, r)
+			continue
+		}
+		var keep []string
+		for _, m := range r.Match {
+			if m == "geoip:private" || !(strings.HasPrefix(m, "geosite:") || strings.HasPrefix(m, "geoip:")) || has(m) {
+				keep = append(keep, m)
+			}
+		}
+		if len(keep) > 0 {
+			r.Match = keep
+			out = append(out, r)
+		}
+	}
+	return out
 }

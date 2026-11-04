@@ -26,12 +26,13 @@ type Routing struct {
 
 // DefaultRouting is the routing of a fresh panel, with no geo data loaded.
 func DefaultRouting() Routing {
-	return NewRouting(routing.Defaults(), "", nil, nil)
+	return NewRouting(routing.Defaults(), "", nil, nil, nil)
 }
 
-// NewRouting expands settings for the compilers.
-func NewRouting(s routing.Settings, geoDir string, sites map[string]geo.Site, ips map[string][]netip.Prefix) Routing {
-	rules, final := s.Expand(Email)
+// NewRouting expands settings for the compilers. has reports whether a
+// geo entry exists in the installed databases (nil: assume it does).
+func NewRouting(s routing.Settings, geoDir string, has func(string) bool, sites map[string]geo.Site, ips map[string][]netip.Prefix) Routing {
+	rules, final := s.Expand(Email, has)
 	rt := Routing{Rules: rules, Final: final, DNS: s.DNS, GeoDir: geoDir, Sites: sites, IPs: ips}
 	if s.WarpUsable() {
 		rt.Warp = s.WARP.Account
