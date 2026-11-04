@@ -10,9 +10,9 @@ CREATE UNIQUE INDEX users_uuid_idx ON users (uuid);
 CREATE TABLE inbounds (
     id            INTEGER PRIMARY KEY,
     remark        TEXT    NOT NULL,
-    protocol      TEXT    NOT NULL,               -- vless
-    transport     TEXT    NOT NULL,               -- xhttp | tcp | grpc
-    security      TEXT    NOT NULL,               -- reality
+    protocol      TEXT    NOT NULL,               -- vless | hysteria2
+    transport     TEXT    NOT NULL,               -- xhttp | tcp | grpc | quic
+    security      TEXT    NOT NULL,               -- reality | tls
     port          INTEGER NOT NULL,
     address       TEXT    NOT NULL DEFAULT '',    -- host for client links; '' = panel default
     settings_json TEXT    NOT NULL,               -- keys, SNI, transport options

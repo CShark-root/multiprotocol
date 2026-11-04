@@ -49,12 +49,48 @@ func VLESSLink(ib store.Inbound, u store.User, host string) string {
 		u.UUID, net.JoinHostPort(host, strconv.Itoa(ib.Port)), q.Encode(), url.PathEscape(ib.Remark+" · "+u.Name))
 }
 
+// Hysteria2Link returns a hysteria2:// URI (official URI scheme, also read
+// by v2rayNG, Hiddify, NekoBox and sing-box based clients). The certificate
+// is self-signed, so the link pins it and sets insecure=1 for clients that
+// cannot pin.
+func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
+	if ib.Address != "" {
+		host = ib.Address
+	}
+	h := ib.Settings.Hysteria
+	q := url.Values{}
+	q.Set("sni", h.SNI)
+	q.Set("insecure", "1")
+	q.Set("pinSHA256", h.PinSHA256)
+	if h.ObfsPassword != "" {
+		q.Set("obfs", "salamander")
+		q.Set("obfs-password", h.ObfsPassword)
+	}
+	return fmt.Sprintf("hysteria2://%s@%s/?%s#%s",
+		url.PathEscape(u.UUID), net.JoinHostPort(host, strconv.Itoa(ib.Port)), q.Encode(), url.PathEscape(ib.Remark+" · "+u.Name))
+}
+
+// Link returns the share link for any supported inbound, or "" if the
+// inbound has no client link.
+func Link(ib store.Inbound, u store.User, host string) string {
+	switch {
+	case ib.Protocol == "vless" && ib.Settings.Reality != nil:
+		return VLESSLink(ib, u, host)
+	case ib.Protocol == "hysteria2" && ib.Settings.Hysteria != nil:
+		return Hysteria2Link(ib, u, host)
+	}
+	return ""
+}
+
 // Links returns one link per enabled inbound.
 func Links(inbounds []store.Inbound, u store.User, host string) []string {
 	var out []string
 	for _, ib := range inbounds {
-		if ib.Enabled && ib.Protocol == "vless" {
-			out = append(out, VLESSLink(ib, u, host))
+		if !ib.Enabled {
+			continue
+		}
+		if l := Link(ib, u, host); l != "" {
+			out = append(out, l)
 		}
 	}
 	return out

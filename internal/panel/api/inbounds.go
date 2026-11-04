@@ -8,29 +8,41 @@ import (
 	"panel/internal/panel/store"
 )
 
-// inboundDTO never carries the Reality private key.
+// inboundDTO never carries private keys, certificates' keys or obfuscation
+// secrets.
 type inboundDTO struct {
-	ID              int64     `json:"id"`
-	Remark          string    `json:"remark"`
-	Protocol        string    `json:"protocol"`
-	Transport       string    `json:"transport"`
-	Security        string    `json:"security"`
-	Port            int       `json:"port"`
-	Address         string    `json:"address"`
-	Enabled         bool      `json:"enabled"`
-	Target          string    `json:"target"`
-	ServerName      string    `json:"serverName"`
-	Fingerprint     string    `json:"fingerprint"`
-	PublicKey       string    `json:"publicKey"`
-	ShortID         string    `json:"shortId"`
-	XHTTPPath       string    `json:"xhttpPath,omitempty"`
-	XHTTPMode       string    `json:"xhttpMode,omitempty"`
-	GRPCServiceName string    `json:"grpcServiceName,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
+	ID        int64     `json:"id"`
+	Remark    string    `json:"remark"`
+	Protocol  string    `json:"protocol"`
+	Transport string    `json:"transport"`
+	Security  string    `json:"security"`
+	Network   string    `json:"network"` // tcp | udp
+	Port      int       `json:"port"`
+	Address   string    `json:"address"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// VLESS + Reality
+	Target          string `json:"target,omitempty"`
+	ServerName      string `json:"serverName"`
+	Fingerprint     string `json:"fingerprint,omitempty"`
+	PublicKey       string `json:"publicKey,omitempty"`
+	ShortID         string `json:"shortId,omitempty"`
+	XHTTPPath       string `json:"xhttpPath,omitempty"`
+	XHTTPMode       string `json:"xhttpMode,omitempty"`
+	GRPCServiceName string `json:"grpcServiceName,omitempty"`
+
+	// Hysteria2
+	Obfs       bool   `json:"obfs"`
+	Masquerade string `json:"masquerade,omitempty"`
+	UpMbps     int    `json:"upMbps,omitempty"`
+	DownMbps   int    `json:"downMbps,omitempty"`
+	CertPin    string `json:"certPin,omitempty"`
 }
 
 type inboundInputDTO struct {
 	Remark          string `json:"remark"`
+	Protocol        string `json:"protocol"`
 	Transport       string `json:"transport"`
 	Port            int    `json:"port"`
 	Address         string `json:"address"`
@@ -40,13 +52,18 @@ type inboundInputDTO struct {
 	XHTTPPath       string `json:"xhttpPath"`
 	XHTTPMode       string `json:"xhttpMode"`
 	GRPCServiceName string `json:"grpcServiceName"`
+	Obfs            bool   `json:"obfs"`
+	Masquerade      string `json:"masquerade"`
+	UpMbps          int    `json:"upMbps"`
+	DownMbps        int    `json:"downMbps"`
 	Enabled         *bool  `json:"enabled"` // omitted = true
 }
 
 func toInboundDTO(ib store.Inbound) inboundDTO {
 	d := inboundDTO{
 		ID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
-		Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled, CreatedAt: ib.CreatedAt,
+		Network: service.Network(ib.Protocol), Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled,
+		CreatedAt: ib.CreatedAt,
 	}
 	if r := ib.Settings.Reality; r != nil {
 		d.Target, d.Fingerprint, d.PublicKey = r.Target, r.Fingerprint, r.PublicKey
@@ -63,15 +80,20 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	if g := ib.Settings.GRPC; g != nil {
 		d.GRPCServiceName = g.ServiceName
 	}
+	if h := ib.Settings.Hysteria; h != nil {
+		d.ServerName, d.Masquerade, d.UpMbps, d.DownMbps = h.SNI, h.Masquerade, h.UpMbps, h.DownMbps
+		d.Obfs, d.CertPin = h.ObfsPassword != "", h.PinSHA256
+	}
 	return d
 }
 
 func (in inboundInputDTO) toInput() service.InboundInput {
 	return service.InboundInput{
-		Remark: in.Remark, Transport: in.Transport, Port: in.Port, Address: in.Address,
-		Target: in.Target, ServerName: in.ServerName, Fingerprint: in.Fingerprint,
+		Remark: in.Remark, Protocol: in.Protocol, Port: in.Port, Address: in.Address,
+		Enabled:   in.Enabled == nil || *in.Enabled,
+		Transport: in.Transport, Target: in.Target, ServerName: in.ServerName, Fingerprint: in.Fingerprint,
 		XHTTPPath: in.XHTTPPath, XHTTPMode: in.XHTTPMode, GRPCServiceName: in.GRPCServiceName,
-		Enabled: in.Enabled == nil || *in.Enabled,
+		Obfs: in.Obfs, Masquerade: in.Masquerade, UpMbps: in.UpMbps, DownMbps: in.DownMbps,
 	}
 }
 
@@ -150,10 +172,20 @@ var realityTargets = []string{
 	"www.nvidia.com", "addons.mozilla.org", "www.amd.com", "www.cisco.com",
 }
 
+// Sites with HTTP/3 that work well as a Hysteria2 masquerade.
+var masqueradeSites = []string{
+	"https://www.bing.com/", "https://www.cloudflare.com/", "https://www.google.com/", "https://www.youtube.com/",
+}
+
 func (s *server) suggestInbound(w http.ResponseWriter, r *http.Request) {
+	network := r.URL.Query().Get("network")
+	if network != "udp" {
+		network = "tcp"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"port":         s.Inbounds.SuggestPort(r.Context()),
+		"port":         s.Inbounds.SuggestPort(r.Context(), network),
 		"targets":      realityTargets,
+		"masquerades":  masqueradeSites,
 		"fingerprints": service.Fingerprints,
 		"xhttpModes":   service.XHTTPModes,
 		"publicHost":   s.PublicHost,

@@ -117,9 +117,13 @@ func (s *Syncer) apply(ctx context.Context) error {
 			active = append(active, u)
 		}
 	}
-	cfg, err := compile.Xray(inbounds, active, s.apiAddr)
+	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr)
 	if err != nil {
 		return err
 	}
-	return s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{"xray": cfg}})
+	hyCfg, err := compile.Hysteria(inbounds, active)
+	if err != nil {
+		return err
+	}
+	return s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{"xray": xrayCfg, "hysteria": hyCfg}})
 }

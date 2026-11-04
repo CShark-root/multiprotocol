@@ -36,11 +36,11 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	links := []linkDTO{}
 	for _, ib := range inbounds {
-		if ib.Enabled {
-			links = append(links, linkDTO{
-				InboundID: ib.ID, Remark: ib.Remark, Transport: ib.Transport,
-				URL: subscription.VLESSLink(ib, u, s.PublicHost),
-			})
+		if !ib.Enabled {
+			continue
+		}
+		if url := subscription.Link(ib, u, s.PublicHost); url != "" {
+			links = append(links, linkDTO{InboundID: ib.ID, Remark: ib.Remark, Transport: ib.Transport, URL: url})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

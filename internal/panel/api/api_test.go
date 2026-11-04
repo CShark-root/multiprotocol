@@ -98,10 +98,24 @@ func TestInboundsAndSubscription(t *testing.T) {
 		t.Fatalf("keys must survive updates: %v", upd)
 	}
 
+	// Hysteria2 listens on UDP, so it may share the port number with Reality.
+	hy := c.expect(201, "POST", "/api/inbounds", map[string]any{"remark": "Hy2", "protocol": "hysteria2", "port": port, "obfs": true})
+	if hy["network"] != "udp" || hy["serverName"] != "www.bing.com" || hy["obfs"] != true || hy["certPin"] == "" {
+		t.Fatalf("hysteria defaults not filled: %v", hy)
+	}
+	for _, secret := range []string{"obfsPassword", "keyPem", "certPem"} {
+		if _, leaked := hy[secret]; leaked {
+			t.Fatalf("%s must never be returned", secret)
+		}
+	}
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "Hy2 dup", "protocol": "hysteria2", "port": port})
+	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "bad", "protocol": "hysteria2", "port": freePort(t), "masquerade": "http://plain.example.com"})
+
 	u := c.expect(201, "POST", "/api/users", map[string]any{"name": "phone"})
 	links := c.expect(200, "GET", "/api/users/"+itoa(int(u["id"].(float64)))+"/links", nil)
 	list := links["links"].([]any)
-	if len(list) != 1 || !strings.HasPrefix(list[0].(map[string]any)["url"].(string), "vless://") {
+	if len(list) != 2 || !strings.HasPrefix(list[0].(map[string]any)["url"].(string), "vless://") ||
+		!strings.HasPrefix(list[1].(map[string]any)["url"].(string), "hysteria2://") {
 		t.Fatalf("unexpected links: %v", links)
 	}
 	subURL := links["subscriptionUrl"].(string)
@@ -117,7 +131,7 @@ func TestInboundsAndSubscription(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	decoded, err := base64.StdEncoding.DecodeString(string(body))
-	if resp.StatusCode != 200 || err != nil || !strings.Contains(string(decoded), "type=xhttp") {
+	if resp.StatusCode != 200 || err != nil || !strings.Contains(string(decoded), "type=xhttp") || !strings.Contains(string(decoded), "hysteria2://") {
 		t.Fatalf("subscription: %d %q (%v)", resp.StatusCode, decoded, err)
 	}
 	if resp.Header.Get("Subscription-Userinfo") == "" {
@@ -135,8 +149,8 @@ func TestInboundsAndSubscription(t *testing.T) {
 	}
 
 	c.expect(204, "DELETE", ibPath, nil)
-	if l := c.expect(200, "GET", "/api/users/"+itoa(int(u["id"].(float64)))+"/links", nil); len(l["links"].([]any)) != 0 {
-		t.Fatalf("links must disappear with the inbound: %v", l)
+	if l := c.expect(200, "GET", "/api/users/"+itoa(int(u["id"].(float64)))+"/links", nil); len(l["links"].([]any)) != 1 {
+		t.Fatalf("the VLESS link must disappear with its inbound: %v", l)
 	}
 }
 

@@ -600,7 +600,7 @@ service Agent {
 
 ### Фаза 2: все протоколы, Hysteria2 и вкладка Amnezia
 - [ ] Остальные транспорты Xray из 4.5: XHTTP/WS/HTTPUpgrade через TLS и CDN, «разделённый» XHTTP, Trojan, VMess, Shadowsocks-2022.
-- [ ] Адаптер Hysteria2 (авторизация, статистика, ACME-сертификат, obfs, port hopping).
+- [x] Адаптер Hysteria2: авторизация через агента (без перезапусков), статистика, kick отключённых, obfs salamander, masquerade, ACL, самоподписанный сертификат с pinSHA256. **Не сделано:** ACME-сертификат, port hopping (нужен nftables и CAP_NET_ADMIN).
 - [ ] Адаптер sing-box: TUIC v5, AnyTLS, NaiveProxy, ShadowTLS v3.
 - [ ] Кнопка «Тестовый набор»: все протоколы без домена + тестовый пользователь, удаление одной кнопкой.
 - [ ] Hysteria2 в подписках и на странице пользователя, единая карточка пользователя (Xray + Hy2).

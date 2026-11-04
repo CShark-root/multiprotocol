@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/agent/hysteria"
 	"panel/internal/agent/xray"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
@@ -58,6 +59,7 @@ func serve(args []string) int {
 	noAgent := fsFlags.Bool("no-local-agent", false, "do not run the embedded agent (multi-node panel host)")
 	xrayBin := fsFlags.String("xray-bin", defaultXrayBin(), "path to the xray binary (geo .dat files next to it)")
 	xrayAPI := fsFlags.String("xray-api", "127.0.0.1:62789", "local address for the Xray stats API")
+	hysteriaBin := fsFlags.String("hysteria-bin", defaultHysteriaBin(), "path to the Hysteria 2 binary")
 	fsFlags.Parse(args)
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -92,7 +94,8 @@ func serve(args []string) int {
 	changed := func() {}
 	if !*noAgent {
 		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), *xrayAPI, log)
-		localAgent = agent.New(xr)
+		hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
+		localAgent = agent.New(xr, hy)
 		defer localAgent.Stop()
 		syncer = service.NewSyncer(st, localAgent, *xrayAPI, log)
 		changed = syncer.Trigger
@@ -190,6 +193,14 @@ func defaultXrayBin() string {
 		return "/usr/local/lib/panel/xray/xray"
 	}
 	return "xray"
+}
+
+// defaultHysteriaBin is where scripts/install-hysteria.sh puts the core.
+func defaultHysteriaBin() string {
+	if runtime.GOOS == "linux" {
+		return "/usr/local/lib/panel/hysteria/hysteria"
+	}
+	return "hysteria"
 }
 
 func loadCert(dataDir string, cfg config.Config) (tls.Certificate, error) {

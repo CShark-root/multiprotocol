@@ -74,30 +74,41 @@ export type UserInput = {
 
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
-export type Transport = 'xhttp' | 'tcp' | 'grpc'
+/** VLESS transports plus 'quic' for Hysteria2: one value per kind of inbound. */
+export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'quic'
+export type Protocol = 'vless' | 'hysteria2'
+
+export const protocolOf = (t: Transport): Protocol => (t === 'quic' ? 'hysteria2' : 'vless')
 
 export type Inbound = {
   id: number
   remark: string
-  protocol: string
+  protocol: Protocol
   transport: Transport
   security: string
+  network: 'tcp' | 'udp'
   port: number
   address: string
   enabled: boolean
-  target: string
   serverName: string
-  fingerprint: string
-  publicKey: string
-  shortId: string
+  target?: string
+  fingerprint?: string
+  publicKey?: string
+  shortId?: string
   xhttpPath?: string
   xhttpMode?: string
   grpcServiceName?: string
+  obfs: boolean
+  masquerade?: string
+  upMbps?: number
+  downMbps?: number
+  certPin?: string
   createdAt: string
 }
 
 export type InboundInput = {
   remark: string
+  protocol: Protocol
   transport: Transport
   port: number
   address: string
@@ -107,12 +118,17 @@ export type InboundInput = {
   xhttpPath: string
   xhttpMode: string
   grpcServiceName: string
+  obfs: boolean
+  masquerade: string
+  upMbps: number
+  downMbps: number
   enabled: boolean
 }
 
 export type InboundSuggest = {
   port: number
   targets: string[]
+  masquerades: string[]
   fingerprints: string[]
   xhttpModes: string[]
   publicHost: string
@@ -162,7 +178,7 @@ export const api = {
   },
   inbounds: {
     list: () => request<Inbound[]>('GET', 'inbounds'),
-    suggest: () => request<InboundSuggest>('GET', 'inbounds/suggest'),
+    suggest: (network: 'tcp' | 'udp') => request<InboundSuggest>('GET', `inbounds/suggest?network=${network}`),
     create: (input: InboundInput) => request<Inbound>('POST', 'inbounds', input),
     update: (id: number, input: InboundInput) => request<Inbound>('PUT', `inbounds/${id}`, input),
     remove: (id: number) => request<void>('DELETE', `inbounds/${id}`),

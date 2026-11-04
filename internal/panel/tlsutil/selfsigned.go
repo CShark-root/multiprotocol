@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -71,6 +72,43 @@ func EnsureSelfSigned(certPath, keyPath string) (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// SelfSignedFor creates a self-signed ECDSA certificate for a domain name,
+// for cores such as Hysteria that need TLS but have no real certificate yet.
+// pin is the lowercase hex SHA-256 of the certificate, for client pinning.
+func SelfSignedFor(name string) (certPEM, keyPEM, pin string, err error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", "", err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+	if err != nil {
+		return "", "", "", err
+	}
+	now := time.Now()
+	tmpl := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: name},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{name},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, key.Public(), key)
+	if err != nil {
+		return "", "", "", err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", "", "", err
+	}
+	sum := sha256.Sum256(der)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})),
+		hex.EncodeToString(sum[:]), nil
 }
 
 // Fingerprint is the SHA-256 of the leaf certificate, formatted the way

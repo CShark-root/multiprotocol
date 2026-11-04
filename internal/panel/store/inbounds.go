@@ -23,9 +23,21 @@ type Inbound struct {
 // InboundSettings is stored as JSON; only the fields for the inbound's
 // transport are set.
 type InboundSettings struct {
-	Reality *RealitySettings `json:"reality,omitempty"`
-	XHTTP   *XHTTPSettings   `json:"xhttp,omitempty"`
-	GRPC    *GRPCSettings    `json:"grpc,omitempty"`
+	Reality  *RealitySettings  `json:"reality,omitempty"`
+	XHTTP    *XHTTPSettings    `json:"xhttp,omitempty"`
+	GRPC     *GRPCSettings     `json:"grpc,omitempty"`
+	Hysteria *HysteriaSettings `json:"hysteria,omitempty"`
+}
+
+type HysteriaSettings struct {
+	SNI          string `json:"sni"`
+	CertPEM      string `json:"certPem"`
+	KeyPEM       string `json:"keyPem"`
+	PinSHA256    string `json:"pinSha256"` // lets clients pin the self-signed cert
+	ObfsPassword string `json:"obfsPassword,omitempty"`
+	Masquerade   string `json:"masquerade"` // site shown to anyone who is not a Hysteria client
+	UpMbps       int    `json:"upMbps,omitempty"`
+	DownMbps     int    `json:"downMbps,omitempty"`
 }
 
 type RealitySettings struct {

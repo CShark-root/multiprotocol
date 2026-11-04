@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installs or updates the panel on a Linux server from files copied into
-# $1 (default /tmp): panel-linux-amd64, panel.service, install-xray.sh.
+# $1 (default /tmp): panel-linux-amd64, panel.service, install-xray.sh,
+# install-hysteria.sh.
 # Used by scripts/vm/deploy.ps1; the future one-line installer reuses it.
 set -euo pipefail
 SRC="${1:-/tmp}"
@@ -18,6 +19,7 @@ id panel &>/dev/null || useradd --system --home-dir /var/lib/panel --shell /usr/
 install -m 0755 "$SRC/panel-linux-amd64" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 [[ -x /usr/local/lib/panel/xray/xray ]] || bash "$SRC/install-xray.sh"
+[[ -x /usr/local/lib/panel/hysteria/hysteria ]] || bash "$SRC/install-hysteria.sh"
 
 systemctl daemon-reload
 systemctl enable panel >/dev/null 2>&1

@@ -17,6 +17,7 @@ if (-not $SkipBuild) {
 $files = @(
     "bin\panel-linux-amd64",
     "scripts\install-xray.sh",
+    "scripts\install-hysteria.sh",
     "deploy\panel.service",
     "deploy\remote-install.sh"
 ) | ForEach-Object { Join-Path $root $_ }
