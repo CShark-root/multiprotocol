@@ -156,3 +156,36 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// virtualIface matches interfaces nobody reaches the panel through: Docker
+// and Amnezia bridges, veth pairs, WireGuard and tunnels.
+func virtualIface(name string) bool {
+	for _, p := range []string{"docker", "br-", "veth", "amn", "wg", "tun", "tap", "virbr", "lxc", "cni", "flannel", "warp"} {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// ReachableIPs are the addresses worth printing as the panel's URL: those
+// of physical interfaces only.
+func ReachableIPs() []net.IP {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var ips []net.IP
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualIface(ifc.Name) {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLinkLocalUnicast() {
+				ips = append(ips, ipnet.IP)
+			}
+		}
+	}
+	return ips
+}

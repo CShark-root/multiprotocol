@@ -78,7 +78,7 @@ func serve(args []string) int {
 	dev := fsFlags.Bool("dev", false, "development mode: plain HTTP on 127.0.0.1:8080 under /dev/")
 	noAgent := fsFlags.Bool("no-local-agent", false, "do not run the embedded agent (multi-node panel host)")
 	xrayBin := fsFlags.String("xray-bin", defaultXrayBin(), "path to the xray binary (geo .dat files next to it)")
-	xrayAPI := fsFlags.String("xray-api", "127.0.0.1:62789", "local address for the Xray stats API")
+	xrayAPI := fsFlags.String("xray-api", "auto", "local address for the Xray stats API (auto: a free loopback port; 3x-ui holds 62789)")
 	hysteriaBin := fsFlags.String("hysteria-bin", defaultCoreBin("hysteria", "hysteria"), "path to the Hysteria 2 binary")
 	singboxBin := fsFlags.String("singbox-bin", defaultCoreBin("sing-box", "sing-box"), "path to the sing-box binary")
 	fsFlags.Parse(args)
@@ -142,6 +142,16 @@ func serve(args []string) int {
 		log.Warn("no geo databases yet; they will be downloaded", "err", err)
 	}
 	var routingSvc *service.Routing
+	if *xrayAPI == "auto" {
+		// A fixed port would clash with other Xray installs on the same
+		// machine (3x-ui uses 62789); the API is only ever reached locally.
+		addr, err := freeLoopback()
+		if err != nil {
+			log.Error("pick a port for the xray api", "err", err)
+			return 1
+		}
+		*xrayAPI = addr
+	}
 	if !*noAgent {
 		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), geoDir, *xrayAPI, log)
 		hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
@@ -388,8 +398,8 @@ func printURLs(w *os.File, cfg config.Config, fingerprint string) {
 	var hosts []string
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
 		hosts = append(hosts, cfg.PublicHost)
-		for _, ip := range tlsutil.LocalIPs() {
-			if !ip.IsLoopback() && ip.String() != cfg.PublicHost {
+		for _, ip := range tlsutil.ReachableIPs() {
+			if ip.String() != cfg.PublicHost {
 				hosts = append(hosts, ip.String())
 			}
 		}
@@ -577,4 +587,13 @@ func adminCmd(args []string) int {
 	}
 	fmt.Println("password changed for", *username, "- all sessions signed out")
 	return 0
+}
+
+func freeLoopback() (string, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer l.Close()
+	return l.Addr().String(), nil
 }
