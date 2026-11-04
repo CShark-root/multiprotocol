@@ -42,7 +42,7 @@ func TestRealityExpertInXray(t *testing.T) {
 	ib.Settings.Reality.MinClientVer, ib.Settings.Reality.MLDSA65Seed = "25.9.11", "SEED"
 	ib.Settings.Sniffing = &store.SniffingSettings{Enabled: true, DestOverride: []string{"tls"}, MetadataOnly: true}
 	ib.Settings.Sockopt = &store.SockoptSettings{TCPFastOpen: true, TCPCongestion: "bbr"}
-	cfg, _ := Xray([]store.Inbound{ib}, nil, "127.0.0.1:1")
+	cfg, _ := Xray([]store.Inbound{ib}, nil, "127.0.0.1:1", DefaultRouting())
 	var parsed struct {
 		Inbounds []struct {
 			Sniffing       map[string]any `json:"sniffing"`

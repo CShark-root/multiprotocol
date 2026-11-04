@@ -275,3 +275,21 @@ func (l *lineRing) String() string {
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, " | ")
 }
+
+// Restart restarts a running core with its current config, for when files
+// it reads at start (geo databases) changed. A stopped core stays stopped.
+func (r *Runner) Restart() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.proc == nil {
+		return nil
+	}
+	r.stopLocked()
+	if err := r.startLocked(filepath.Join(r.spec.Dir, r.spec.Config)); err != nil {
+		r.current = nil
+		r.lastErr = r.spec.Name + " failed to restart: " + err.Error()
+		return errors.New(r.lastErr)
+	}
+	r.spec.Log.Info("restarted")
+	return nil
+}

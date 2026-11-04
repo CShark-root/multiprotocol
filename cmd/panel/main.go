@@ -16,10 +16,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -31,6 +33,7 @@ import (
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
+	"panel/internal/panel/geo"
 	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
@@ -119,15 +122,25 @@ func serve(args []string) int {
 	var localAgent *agent.Agent
 	var syncer *service.Syncer
 	changed := func() {}
+	geoDir := filepath.Join(*dataDir, "geo")
+	if err := geo.Seed(geoDir, filepath.Dir(*xrayBin)); err != nil {
+		log.Warn("no geo databases yet; they will be downloaded", "err", err)
+	}
+	var routingSvc *service.Routing
 	if !*noAgent {
-		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), *xrayAPI, log)
+		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), geoDir, *xrayAPI, log)
 		hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
 		sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
 		localAgent = agent.New(xr, hy, sb)
 		defer localAgent.Stop()
 		syncer = service.NewSyncer(st, localAgent, events, *xrayAPI, log)
 		changed = syncer.Trigger
+		routingSvc = service.NewRouting(st, events, geoDir, changed, localAgent.RestartCores, log)
+		syncer.SetRouting(routingSvc)
 		go syncer.Run(ctx)
+		go routingSvc.RunGeoUpdates(ctx)
+	} else {
+		routingSvc = service.NewRouting(st, events, geoDir, nil, nil, log)
 	}
 
 	_, portStr, _ := net.SplitHostPort(cfg.Listen)
@@ -155,6 +168,8 @@ func serve(args []string) int {
 		Journal:    hub,
 		Store:      st,
 		Scanner:    service.NewScanner(),
+		Routing:    routingSvc,
+		Reboot:     rebootFunc(*dev),
 		Panel:      api.PanelConfig{DataDir: *dataDir, Current: stored, Restart: restart},
 		Agent:      localAgent,
 		Web:        web.Files(),
@@ -360,5 +375,20 @@ func printURLs(w *os.File, cfg config.Config, fingerprint string) {
 	if fingerprint != "" {
 		fmt.Fprintln(w, "TLS certificate SHA-256 fingerprint (check it in the browser on first visit):")
 		fmt.Fprintln(w, "  "+fingerprint)
+	}
+}
+
+// rebootFunc reboots the machine through logind; the installer grants the
+// panel user exactly this polkit action. Development runs cannot reboot.
+func rebootFunc(dev bool) func() error {
+	if dev || runtime.GOOS != "linux" {
+		return nil
+	}
+	return func() error {
+		out, err := exec.Command("systemctl", "reboot").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 }

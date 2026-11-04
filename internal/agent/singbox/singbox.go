@@ -35,8 +35,16 @@ import (
 // second is cheap and keeps the uncounted tail short.
 const pollInterval = time.Second
 
-// userOutboundPrefix must match compile.SingBoxUserOutbound.
-const userOutboundPrefix = "direct-"
+// userFromChains finds the per-user outbound ("direct-u7", "warp-u7"; see
+// compile.SingBox) in a connection's chain and returns the user tag.
+func userFromChains(chains []string) (string, bool) {
+	for _, c := range chains {
+		if _, email, ok := strings.Cut(c, "-"); ok && len(email) > 1 && email[0] == 'u' {
+			return email, true
+		}
+	}
+	return "", false
+}
 
 type Adapter struct {
 	runner *core.Runner
@@ -205,10 +213,10 @@ func (a *Adapter) account(c connections) {
 	for _, conn := range c.Connections {
 		cur := connState{conn.Upload, conn.Download}
 		seen[conn.ID] = cur
-		if len(conn.Chains) == 0 || !strings.HasPrefix(conn.Chains[0], userOutboundPrefix) {
+		email, ok := userFromChains(conn.Chains)
+		if !ok {
 			continue
 		}
-		email := strings.TrimPrefix(conn.Chains[0], userOutboundPrefix)
 		o := online[email]
 		if o == nil {
 			o = &agent.OnlineEntry{Email: email}
@@ -259,3 +267,5 @@ func randomHex(n int) string {
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+func (a *Adapter) Restart() error { return a.runner.Restart() }

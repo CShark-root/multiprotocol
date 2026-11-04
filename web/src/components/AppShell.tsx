@@ -31,7 +31,7 @@ const nav: NavItem[] = [
   { to: '/users', key: 'users', icon: Users },
   { to: '/inbounds', key: 'inbounds', icon: Cable },
   { to: '/nodes', key: 'nodes', icon: Server, soon: true },
-  { to: '/routing', key: 'routing', icon: RouteIcon, soon: true },
+  { to: '/routing', key: 'routing', icon: RouteIcon },
   { to: '/logs', key: 'logs', icon: Activity },
   { to: '/amnezia', key: 'amnezia', icon: Shield, soon: true },
   { to: '/settings', key: 'settings', icon: Settings },

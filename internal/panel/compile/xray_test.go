@@ -28,7 +28,7 @@ func inbound(id int64, transport string) store.Inbound {
 func TestXrayNoInboundsMeansStop(t *testing.T) {
 	disabled := inbound(1, "xhttp")
 	disabled.Enabled = false
-	cfg, err := Xray([]store.Inbound{disabled}, nil, "127.0.0.1:1")
+	cfg, err := Xray([]store.Inbound{disabled}, nil, "127.0.0.1:1", DefaultRouting())
 	if err != nil || cfg != nil {
 		t.Fatalf("want nil config, got %s, %v", cfg, err)
 	}
@@ -37,11 +37,11 @@ func TestXrayNoInboundsMeansStop(t *testing.T) {
 func TestXrayConfig(t *testing.T) {
 	users := []store.User{{ID: 7, UUID: "11111111-1111-4111-8111-111111111111"}}
 	ins := []store.Inbound{inbound(1, "xhttp"), inbound(2, "tcp"), inbound(3, "grpc")}
-	cfg, err := Xray(ins, users, "127.0.0.1:10085")
+	cfg, err := Xray(ins, users, "127.0.0.1:10085", DefaultRouting())
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _ := Xray(ins, users, "127.0.0.1:10085")
+	again, _ := Xray(ins, users, "127.0.0.1:10085", DefaultRouting())
 	if !bytes.Equal(cfg, again) {
 		t.Fatal("output must be deterministic")
 	}

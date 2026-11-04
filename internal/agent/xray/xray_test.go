@@ -28,7 +28,7 @@ func TestParseStats(t *testing.T) {
 
 func TestApplyWithoutBinary(t *testing.T) {
 	dir := t.TempDir()
-	a := New(filepath.Join(dir, "missing-xray"), dir, "127.0.0.1:1", slog.Default())
+	a := New(filepath.Join(dir, "missing-xray"), dir, dir, "127.0.0.1:1", slog.Default())
 	if err := a.Apply(context.Background(), []byte(`{}`)); err == nil {
 		t.Fatal("expected an error without the binary")
 	}

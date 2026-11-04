@@ -36,5 +36,6 @@ func readSystemInfo() SystemInfo {
 			}
 		}
 	}
+	info.NetIface, info.NetRxBps, info.NetTxBps = netRate()
 	return info
 }

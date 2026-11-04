@@ -20,6 +20,7 @@ type Syncer struct {
 	agent   *agent.Agent
 	events  *Events
 	apiAddr string
+	routing *Routing // nil: defaults (tests)
 	log     *slog.Logger
 	now     func() time.Time
 	trigger chan struct{}
@@ -40,6 +41,9 @@ func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr str
 		trigger: make(chan struct{}, 1), coreDown: map[string]bool{},
 	}
 }
+
+// SetRouting gives the syncer the routing settings to compile with.
+func (s *Syncer) SetRouting(r *Routing) { s.routing = r }
 
 // Trigger schedules a sync soon; calls coalesce.
 func (s *Syncer) Trigger() {
@@ -173,15 +177,21 @@ func (s *Syncer) apply(ctx context.Context) error {
 		}
 	}
 	s.recordUserChanges(ctx, users, statuses)
-	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr)
+	rt := compile.DefaultRouting()
+	if s.routing != nil {
+		if rt, err = s.routing.Compile(ctx); err != nil {
+			return err
+		}
+	}
+	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr, rt)
 	if err != nil {
 		return err
 	}
-	hyCfg, err := compile.Hysteria(inbounds, active)
+	hyCfg, err := compile.Hysteria(inbounds, active, rt)
 	if err != nil {
 		return err
 	}
-	sbCfg, err := compile.SingBox(inbounds, active)
+	sbCfg, err := compile.SingBox(inbounds, active, rt)
 	if err != nil {
 		return err
 	}

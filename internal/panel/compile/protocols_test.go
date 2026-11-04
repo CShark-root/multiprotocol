@@ -17,7 +17,7 @@ func TestXrayTrojanVMessShadowsocks(t *testing.T) {
 	ss := store.Inbound{ID: 3, Protocol: "shadowsocks", Transport: "tcp", Port: 3000, Enabled: true,
 		Settings: store.InboundSettings{Shadowsocks: &store.ShadowsocksSettings{Method: "2022-blake3-aes-128-gcm", ServerPSK: "PSK"}}}
 
-	cfg, err := Xray([]store.Inbound{trojan, vmess, ss}, []store.User{testUser}, "127.0.0.1:1")
+	cfg, err := Xray([]store.Inbound{trojan, vmess, ss}, []store.User{testUser}, "127.0.0.1:1", DefaultRouting())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,10 +59,10 @@ func TestSingBoxConfig(t *testing.T) {
 		Shadowsocks: &store.ShadowsocksSettings{Method: "2022-blake3-aes-128-gcm", ServerPSK: "PSK"},
 	}}
 
-	if cfg, _ := SingBox([]store.Inbound{inbound(9, "xhttp")}, nil); cfg != nil {
+	if cfg, _ := SingBox([]store.Inbound{inbound(9, "xhttp")}, nil, DefaultRouting()); cfg != nil {
 		t.Fatal("Xray inbounds must not produce a sing-box config")
 	}
-	cfg, err := SingBox([]store.Inbound{tuic, anytls, stls}, []store.User{testUser})
+	cfg, err := SingBox([]store.Inbound{tuic, anytls, stls}, []store.User{testUser}, DefaultRouting())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,8 @@ func TestSingBoxConfig(t *testing.T) {
 	if !routed {
 		t.Errorf("no per-user route rule: %v", parsed.Route.Rules)
 	}
-	if first := parsed.Route.Rules[0]; first["action"] != "reject" {
-		t.Errorf("private ranges must be rejected first: %v", first)
+	// Sniffing comes first (domain rules need it), then the private ranges.
+	if r := parsed.Route.Rules; r[0]["action"] != "sniff" || r[1]["action"] != "reject" {
+		t.Errorf("want sniff, then the private-range reject: %v", r[:2])
 	}
 }

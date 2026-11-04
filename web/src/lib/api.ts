@@ -75,6 +75,40 @@ export type UserInput = {
 export type OnlineEntry = { userId: number; ips: string[]; connections: number }
 export type DayTraffic = { day: string; bytes: number }
 
+export type Outbound = 'direct' | 'block' | 'warp' | 'ipv4'
+export type CoreSupport = 'full' | 'partial' | 'none'
+export type RoutingRule = {
+  id: string
+  name: string
+  enabled: boolean
+  match: string[]
+  ports: string
+  network: '' | 'tcp' | 'udp'
+  protocols: string[]
+  users: number[]
+  outbound: Outbound
+  support?: { xray: CoreSupport; hysteria: CoreSupport; singbox: CoreSupport }
+}
+export type RoutingPresets = {
+  blockPrivate: boolean
+  blockSmtp: boolean
+  blockBittorrent: boolean
+  blockAds: boolean
+  googleIpv4: boolean
+  warpServices: string[]
+}
+export type WarpMode = 'off' | 'rules' | 'all'
+export type RoutingSettings = {
+  presets: RoutingPresets
+  rules: RoutingRule[]
+  warp: { mode: WarpMode; registered: boolean; warpPlus: boolean; address4?: string; address6?: string; endpoint?: string; registeredAt?: string }
+  dns: { upstream: string; custom: string; strategy: 'prefer4' | 'ipv4' | 'both' }
+  geo: { source: 'loyalsoldier' | 'runetfreedom' | 'custom'; geoipUrl: string; geositeUrl: string; autoUpdate: boolean }
+  services: string[]
+  geoState: { lastCheck: string; lastUpdate: string; lastError: string; lastSource: string; files: { name: string; size: number; modified: string }[] }
+}
+export type Trace = { ip: string; country: string; warp: string; latencyMs: number }
+
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
 export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
@@ -218,6 +252,9 @@ export type SystemInfo = {
       load1: number
       load5: number
       load15: number
+      netIface: string
+      netRxBps: number
+      netTxBps: number
     }
     cores: CoreHealth[]
   } | null
@@ -287,7 +324,26 @@ export const api = {
     request<{ admin: Admin }>('POST', 'auth/login', code ? { username, password, code } : { username, password }),
   logout: () => request<void>('POST', 'auth/logout'),
   system: () => request<SystemInfo>('GET', 'system'),
+  restartCores: () => request<void>('POST', 'system/restart-cores', {}),
+  reboot: (password: string) => request<{ rebooting: boolean }>('POST', 'system/reboot', { password }),
   online: () => request<OnlineEntry[]>('GET', 'online'),
+  routing: {
+    get: () => request<RoutingSettings>('GET', 'routing'),
+    save: (s: RoutingSettings) =>
+      request<RoutingSettings>('PUT', 'routing', {
+        presets: s.presets,
+        rules: s.rules.map(({ support: _s, ...r }) => r),
+        warp: { mode: s.warp.mode },
+        dns: s.dns,
+        geo: s.geo,
+      }),
+    registerWarp: () => request<RoutingSettings>('POST', 'routing/warp', {}),
+    warpLicense: (license: string) => request<RoutingSettings>('POST', 'routing/warp/license', { license }),
+    deleteWarp: () => request<RoutingSettings>('DELETE', 'routing/warp'),
+    checkWarp: () => request<{ direct: Trace; warp?: Trace; error?: string }>('POST', 'routing/warp/check', {}),
+    updateGeo: () => request<{ changed: boolean }>('POST', 'routing/geo/update', {}),
+    geoCodes: (q: string) => request<string[]>('GET', 'routing/geo/codes?q=' + encodeURIComponent(q)),
+  },
   trafficByDay: (days = 30) => request<DayTraffic[]>('GET', `stats/traffic?days=${days}`),
   users: {
     list: () => request<User[]>('GET', 'users'),

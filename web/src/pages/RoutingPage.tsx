@@ -1,0 +1,642 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ArrowDown,
+  ArrowUp,
+  Cloud,
+  Database,
+  Globe,
+  ListFilter,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react'
+import {
+  ApiError,
+  api,
+  type CoreSupport,
+  type Outbound,
+  type RoutingRule,
+  type RoutingSettings,
+  type Trace,
+  type User,
+} from '@/lib/api'
+import { formatBytes } from '@/lib/utils'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
+
+const outbounds: Outbound[] = ['direct', 'block', 'warp', 'ipv4']
+const outboundTone: Record<Outbound, 'muted' | 'danger' | 'accent' | 'warning'> = {
+  direct: 'muted',
+  block: 'danger',
+  warp: 'accent',
+  ipv4: 'warning',
+}
+
+function Section({ icon, title, hint, actions, children }: { icon: ReactNode; title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-accent-foreground">{icon}</span>
+            <h2 className="font-semibold">{title}</h2>
+          </div>
+          {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
+        </div>
+        {actions}
+      </div>
+      <div className="mt-4">{children}</div>
+    </Card>
+  )
+}
+
+function ToggleRow({ title, hint, checked, onChange, disabled }: { title: string; hint: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5">
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs text-muted-foreground">{hint}</div>
+      </div>
+      <Switch checked={checked} onChange={onChange} label={title} disabled={disabled} />
+    </div>
+  )
+}
+
+export function RoutingPage() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const routing = useQuery({ queryKey: ['routing'], queryFn: api.routing.get })
+  const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
+  const [draft, setDraft] = useState<RoutingSettings | null>(null)
+  const [error, setError] = useState('')
+
+  // The draft follows the server until the admin changes something.
+  const base = routing.data
+  const s = draft ?? base
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(base)
+  const edit = (fn: (d: RoutingSettings) => void) => {
+    const next = structuredClone(s!)
+    fn(next)
+    setDraft(next)
+  }
+  const accept = (data: RoutingSettings) => {
+    qc.setQueryData(['routing'], data)
+    // Keep unsaved edits; WARP itself is whatever the server now has.
+    setDraft((d) => (d ? { ...d, warp: data.warp } : null))
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.routing.save(s!),
+    onSuccess: (data) => {
+      qc.setQueryData(['routing'], data)
+      setDraft(null)
+      setError('')
+    },
+    onError: (err) => setError(err instanceof ApiError && err.field ? `${err.field}: ${err.message}` : t('common.error')),
+  })
+
+  if (routing.isPending) return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+  if (routing.isError || !s) return <p className="text-sm text-destructive">{t('common.error')}</p>
+
+  return (
+    <>
+      <PageHeader title={t('routing.title')} subtitle={t('routing.subtitle')} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="space-y-4">
+          <Section icon={<ShieldCheck className="h-5 w-5" />} title={t('routing.protection')} hint={t('routing.protectionHint')}>
+            <div className="divide-y">
+              {(['blockPrivate', 'blockSmtp', 'blockBittorrent', 'blockAds', 'googleIpv4'] as const).map((k) => (
+                <ToggleRow
+                  key={k}
+                  title={t(`routing.presets.${k}`)}
+                  hint={t(`routing.presets.${k}Hint`)}
+                  checked={s.presets[k]}
+                  onChange={(v) => edit((d) => (d.presets[k] = v))}
+                />
+              ))}
+            </div>
+          </Section>
+          <WarpCard s={s} edit={edit} onServer={accept} />
+        </div>
+        <div className="space-y-4">
+          <RulesCard s={s} edit={edit} users={users.data ?? []} />
+          <DnsCard s={s} edit={edit} />
+          <GeoCard s={s} edit={edit} />
+        </div>
+      </div>
+
+      {(dirty || error) && (
+        <div className="sticky bottom-4 z-20 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card px-4 py-3 shadow-lg">
+          <div className="text-sm">
+            {error ? <span className="text-destructive">{error}</span> : <span className="text-muted-foreground">{t('routing.unsaved')}</span>}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDraft(null)
+                setError('')
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button disabled={save.isPending || !dirty} onClick={() => save.mutate()}>
+              {t('routing.apply')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+type CardProps = { s: RoutingSettings; edit: (fn: (d: RoutingSettings) => void) => void }
+
+function TraceLine({ label, tr }: { label: string; tr: Trace }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono text-xs">
+        {tr.ip} · {tr.country} · {tr.latencyMs} ms
+      </span>
+    </div>
+  )
+}
+
+function WarpCard({ s, edit, onServer }: CardProps & { onServer: (d: RoutingSettings) => void }) {
+  const { t } = useTranslation()
+  const [license, setLicense] = useState('')
+  const [showLicense, setShowLicense] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const fail = (err: unknown) => (err instanceof ApiError ? err.message : t('common.error'))
+  const register = useMutation({ mutationFn: api.routing.registerWarp, onSuccess: onServer })
+  const setKey = useMutation({ mutationFn: () => api.routing.warpLicense(license), onSuccess: (d) => (onServer(d), setLicense(''), setShowLicense(false)) })
+  const remove = useMutation({ mutationFn: api.routing.deleteWarp, onSuccess: (d) => (onServer(d), setConfirmDelete(false)) })
+  const check = useMutation({ mutationFn: api.routing.checkWarp })
+  const w = s.warp
+
+  return (
+    <Section
+      icon={<Cloud className="h-5 w-5" />}
+      title="Cloudflare WARP"
+      hint={t('routing.warpHint')}
+      actions={w.registered ? <Badge tone={w.warpPlus ? 'accent' : 'success'}>{w.warpPlus ? 'WARP+' : t('routing.warpFree')}</Badge> : undefined}
+    >
+      {!w.registered ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{t('routing.warpIntro')}</p>
+          <Button onClick={() => register.mutate()} disabled={register.isPending}>
+            <Cloud className="h-4 w-4" />
+            {register.isPending ? t('routing.warpRegistering') : t('routing.warpRegister')}
+          </Button>
+          {register.isError && <p className="text-sm text-destructive">{fail(register.error)}</p>}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {(['off', 'rules', 'all'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => edit((d) => (d.warp.mode = m))}
+                className={
+                  'rounded-xl border p-3 text-left transition ' + (w.mode === m ? 'border-primary bg-accent' : 'hover:bg-muted/60')
+                }
+              >
+                <div className="text-sm font-medium">{t(`routing.warpMode.${m}`)}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{t(`routing.warpMode.${m}Hint`)}</div>
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <div className="text-sm font-medium">{t('routing.warpServices')}</div>
+            <p className="text-xs text-muted-foreground">{t('routing.warpServicesHint')}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {s.services.map((sv) => {
+                const on = s.presets.warpServices.includes(sv)
+                return (
+                  <button
+                    key={sv}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={w.mode === 'off'}
+                    onClick={() =>
+                      edit((d) => {
+                        d.presets.warpServices = on ? d.presets.warpServices.filter((x) => x !== sv) : [...d.presets.warpServices, sv]
+                      })
+                    }
+                    className={
+                      'rounded-full border px-3 py-1 text-sm transition disabled:opacity-50 ' +
+                      (on ? 'border-primary bg-accent text-accent-foreground' : 'hover:bg-muted/60')
+                    }
+                  >
+                    {t(`routing.services.${sv}`)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-muted/60 p-3.5 text-xs text-muted-foreground">
+            {t('routing.warpAddress')}: <span className="font-mono">{w.address4}</span>
+            {w.address6 && <span className="font-mono"> · {w.address6}</span>}
+          </div>
+
+          {check.data && (
+            <div className="space-y-1.5 rounded-xl border p-3.5">
+              <TraceLine label={t('routing.checkDirect')} tr={check.data.direct} />
+              {check.data.warp ? (
+                <TraceLine label={t('routing.checkWarp')} tr={check.data.warp} />
+              ) : (
+                <p className="text-sm text-destructive">{t('routing.checkFailed', { error: check.data.error ?? '' })}</p>
+              )}
+            </div>
+          )}
+
+          {showLicense && (
+            <div className="flex gap-2">
+              <Input value={license} onChange={(e) => setLicense(e.target.value)} placeholder="xxxxxxxx-xxxxxxxx-xxxxxxxx" />
+              <Button onClick={() => setKey.mutate()} disabled={setKey.isPending || license.trim().length < 8}>
+                {t('common.save')}
+              </Button>
+            </div>
+          )}
+          {setKey.isError && <p className="text-sm text-destructive">{fail(setKey.error)}</p>}
+
+          {confirmDelete ? (
+            <div className="rounded-xl bg-destructive-soft p-3.5 text-sm">
+              <p>{t('routing.warpDeleteConfirm')}</p>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="danger" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+                  {t('common.delete')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" disabled={check.isPending || w.mode === 'off'} onClick={() => check.mutate()}>
+                {check.isPending ? t('routing.checking') : t('routing.check')}
+              </Button>
+              {!showLicense && (
+                <Button variant="ghost" size="sm" onClick={() => setShowLicense(true)}>
+                  {t('routing.warpPlusKey')}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" disabled={register.isPending} onClick={() => register.mutate()} title={t('routing.warpReissueHint')}>
+                <RefreshCw className="h-4 w-4" />
+                {t('routing.warpReissue')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}>
+                <Trash2 className="h-4 w-4" />
+                {t('common.delete')}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function SupportMarks({ support }: { support?: RoutingRule['support'] }) {
+  const { t } = useTranslation()
+  if (!support) return null
+  const mark = (v: CoreSupport) => (v === 'full' ? '✓' : v === 'partial' ? '≈' : '—')
+  const tip = (core: string, v: CoreSupport) => `${core}: ${t(`routing.support.${v}`)}`
+  return (
+    <span className="text-[11px] text-muted-foreground" title={[tip('Xray', support.xray), tip('Hysteria', support.hysteria), tip('sing-box', support.singbox)].join('\n')}>
+      Xray {mark(support.xray)} · Hy2 {mark(support.hysteria)} · sing-box {mark(support.singbox)}
+    </span>
+  )
+}
+
+function RulesCard({ s, edit, users }: CardProps & { users: User[] }) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState<{ index: number; rule: RoutingRule } | null>(null)
+  const move = (i: number, by: number) =>
+    edit((d) => {
+      const [r] = d.rules.splice(i, 1)
+      d.rules.splice(i + by, 0, r)
+    })
+  const blank: RoutingRule = { id: '', name: '', enabled: true, match: [], ports: '', network: '', protocols: [], users: [], outbound: 'direct' }
+
+  return (
+    <Section
+      icon={<ListFilter className="h-5 w-5" />}
+      title={t('routing.rules')}
+      hint={t('routing.rulesHint')}
+      actions={
+        <Button size="sm" variant="secondary" onClick={() => setEditing({ index: -1, rule: blank })}>
+          <Plus className="h-4 w-4" />
+          {t('routing.addRule')}
+        </Button>
+      }
+    >
+      {s.rules.length === 0 ? (
+        <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">{t('routing.noRules')}</p>
+      ) : (
+        <ul className="divide-y rounded-xl border">
+          {s.rules.map((r, i) => (
+            <li key={r.id || i} className="flex items-center gap-3 p-3">
+              <Switch checked={r.enabled} label={r.enabled ? t('routing.ruleOn') : t('routing.ruleOff')} onChange={(v) => edit((d) => (d.rules[i].enabled = v))} />
+              <div className={'min-w-0 flex-1 ' + (r.enabled ? '' : 'opacity-60')}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{r.name || t('routing.untitled')}</span>
+                  <Badge tone={outboundTone[r.outbound]}>{t(`routing.outbound.${r.outbound}`)}</Badge>
+                </div>
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">{ruleSummary(r, users, t)}</div>
+                <SupportMarks support={r.support} />
+              </div>
+              <div className="flex shrink-0 items-center">
+                <Button variant="ghost" size="icon" aria-label={t('routing.up')} disabled={i === 0} onClick={() => move(i, -1)}>
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" aria-label={t('routing.down')} disabled={i === s.rules.length - 1} onClick={() => move(i, 1)}>
+                  <ArrowDown className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" aria-label={t('common.edit')} onClick={() => setEditing({ index: i, rule: r })}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" aria-label={t('common.delete')} onClick={() => edit((d) => d.rules.splice(i, 1))}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">{t('routing.orderHint')}</p>
+      {editing && (
+        <RuleDialog
+          rule={editing.rule}
+          users={users}
+          warpOff={s.warp.mode === 'off' || !s.warp.registered}
+          onClose={() => setEditing(null)}
+          onSave={(r) => {
+            edit((d) => {
+              // Support marks are recomputed by the server on save.
+              const { support: _s, ...clean } = r
+              if (editing.index < 0) d.rules.push(clean)
+              else d.rules[editing.index] = clean
+            })
+            setEditing(null)
+          }}
+        />
+      )}
+    </Section>
+  )
+}
+
+function ruleSummary(r: RoutingRule, users: User[], t: (k: string, o?: Record<string, unknown>) => string): string {
+  const parts: string[] = []
+  if (r.match.length) parts.push(r.match.slice(0, 3).join(', ') + (r.match.length > 3 ? ` +${r.match.length - 3}` : ''))
+  if (r.ports) parts.push(t('routing.portsShort', { ports: r.ports }))
+  if (r.network) parts.push(r.network.toUpperCase())
+  if (r.protocols.length) parts.push(r.protocols.join(', '))
+  if (r.users.length) parts.push(r.users.map((id) => users.find((u) => u.id === id)?.name ?? `#${id}`).join(', '))
+  return parts.join(' · ')
+}
+
+function RuleDialog({
+  rule,
+  users,
+  warpOff,
+  onClose,
+  onSave,
+}: {
+  rule: RoutingRule
+  users: User[]
+  warpOff: boolean
+  onClose: () => void
+  onSave: (r: RoutingRule) => void
+}) {
+  const { t } = useTranslation()
+  const [r, setR] = useState(rule)
+  const [text, setText] = useState(rule.match.join('\n'))
+  const [more, setMore] = useState(Boolean(rule.ports || rule.network || rule.protocols.length || rule.users.length))
+  const lastLine = text.split('\n').at(-1)?.trim() ?? ''
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setQ(lastLine.startsWith('geo') ? lastLine : ''), 200)
+    return () => clearTimeout(id)
+  }, [lastLine])
+  const codes = useQuery({ queryKey: ['geoCodes', q], queryFn: () => api.routing.geoCodes(q), enabled: q.length >= 4 })
+  const match = useMemo(() => text.split('\n').map((x) => x.trim()).filter(Boolean), [text])
+  const empty = match.length === 0 && !r.ports && !r.network && r.protocols.length === 0 && r.users.length === 0
+
+  const pick = (code: string) => {
+    const lines = text.split('\n')
+    lines[lines.length - 1] = code
+    setText(lines.join('\n') + '\n')
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={rule.id ? t('routing.editRule') : t('routing.newRule')}>
+      <form
+        className="max-h-[75vh] space-y-4 overflow-y-auto pr-1"
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave({ ...r, match })
+        }}
+      >
+        <Field label={t('routing.ruleName')}>
+          {(id) => <Input id={id} value={r.name} maxLength={80} onChange={(e) => setR({ ...r, name: e.target.value })} placeholder={t('routing.ruleNamePlaceholder')} />}
+        </Field>
+        <Field label={t('routing.ruleMatch')} hint={t('routing.ruleMatchHint')}>
+          {(id) => (
+            <textarea
+              id={id}
+              rows={5}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={'geosite:openai\nexample.com\ngeoip:ru\n203.0.113.0/24'}
+              className="w-full rounded-xl border border-input bg-card px-3.5 py-2.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          )}
+        </Field>
+        {codes.data && codes.data.length > 0 && q && (
+          <div className="-mt-2 flex flex-wrap gap-1.5">
+            {codes.data.slice(0, 16).map((c) => (
+              <button key={c} type="button" onClick={() => pick(c)} className="rounded-full border px-2.5 py-0.5 font-mono text-xs hover:bg-muted/60">
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+        <Field label={t('routing.ruleOutbound')}>
+          {(id) => (
+            <Select id={id} value={r.outbound} onChange={(e) => setR({ ...r, outbound: e.target.value as Outbound })}>
+              {outbounds.map((o) => (
+                <option key={o} value={o}>
+                  {t(`routing.outbound.${o}`)}
+                  {o === 'warp' && warpOff ? ` (${t('routing.warpOffNote')})` : ''}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+
+        {!more ? (
+          <button type="button" className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={() => setMore(true)}>
+            {t('routing.moreConditions')}
+          </button>
+        ) : (
+          <div className="space-y-4 rounded-xl bg-muted/60 p-3.5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label={t('routing.rulePorts')} hint={t('routing.rulePortsHint')}>
+                {(id) => <Input id={id} value={r.ports} onChange={(e) => setR({ ...r, ports: e.target.value })} placeholder="443, 8000-8100" />}
+              </Field>
+              <Field label={t('routing.ruleNetwork')}>
+                {(id) => (
+                  <Select id={id} value={r.network} onChange={(e) => setR({ ...r, network: e.target.value as RoutingRule['network'] })}>
+                    <option value="">{t('routing.networkAny')}</option>
+                    <option value="tcp">TCP</option>
+                    <option value="udp">UDP</option>
+                  </Select>
+                )}
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={r.protocols.includes('bittorrent')}
+                onChange={(e) => setR({ ...r, protocols: e.target.checked ? ['bittorrent'] : [] })}
+              />
+              {t('routing.onlyBittorrent')}
+            </label>
+            {users.length > 0 && (
+              <div>
+                <div className="text-sm font-medium">{t('routing.ruleUsers')}</div>
+                <p className="text-xs text-muted-foreground">{t('routing.ruleUsersHint')}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {users.map((u) => {
+                    const on = r.users.includes(u.id)
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setR({ ...r, users: on ? r.users.filter((x) => x !== u.id) : [...r.users, u.id] })}
+                        className={'rounded-full border px-3 py-1 text-sm ' + (on ? 'border-primary bg-accent text-accent-foreground' : 'hover:bg-card')}
+                      >
+                        {u.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {empty && <p className="text-xs text-warning">{t('routing.ruleEmpty')}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" disabled={empty}>
+            {t('routing.ruleDone')}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+const dnsUpstreams = ['cloudflare', 'google', 'quad9', 'adguard', 'system', 'custom']
+
+function DnsCard({ s, edit }: CardProps) {
+  const { t } = useTranslation()
+  return (
+    <Section icon={<Globe className="h-5 w-5" />} title={t('routing.dns')} hint={t('routing.dnsHint')}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label={t('routing.dnsUpstream')}>
+          {(id) => (
+            <Select id={id} value={s.dns.upstream} onChange={(e) => edit((d) => (d.dns.upstream = e.target.value))}>
+              {dnsUpstreams.map((u) => (
+                <option key={u} value={u}>
+                  {t(`routing.dnsUpstreams.${u}`)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label={t('routing.dnsStrategy')}>
+          {(id) => (
+            <Select id={id} value={s.dns.strategy} onChange={(e) => edit((d) => (d.dns.strategy = e.target.value as RoutingSettings['dns']['strategy']))}>
+              {(['prefer4', 'ipv4', 'both'] as const).map((v) => (
+                <option key={v} value={v}>
+                  {t(`routing.dnsStrategies.${v}`)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+      {s.dns.upstream === 'custom' && (
+        <div className="mt-4">
+          <Field label={t('routing.dnsCustom')} hint={t('routing.dnsCustomHint')}>
+            {(id) => <Input id={id} value={s.dns.custom} onChange={(e) => edit((d) => (d.dns.custom = e.target.value))} placeholder="https://dns.example/dns-query" />}
+          </Field>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function GeoCard({ s, edit }: CardProps) {
+  const { t, i18n } = useTranslation()
+  const qc = useQueryClient()
+  const lng = i18n.language
+  const update = useMutation({ mutationFn: api.routing.updateGeo, onSettled: () => qc.invalidateQueries({ queryKey: ['routing'] }) })
+  const st = s.geoState
+  const fmt = (iso: string) => (iso && !iso.startsWith('0001') ? new Date(iso).toLocaleString(lng, { dateStyle: 'medium', timeStyle: 'short' }) : '—')
+  return (
+    <Section icon={<Database className="h-5 w-5" />} title={t('routing.geo')} hint={t('routing.geoHint')}>
+      <div className="space-y-4">
+        <Field label={t('routing.geoSource')} hint={t(`routing.geoSources.${s.geo.source}Hint`)}>
+          {(id) => (
+            <Select id={id} value={s.geo.source} onChange={(e) => edit((d) => (d.geo.source = e.target.value as RoutingSettings['geo']['source']))}>
+              {(['loyalsoldier', 'runetfreedom', 'custom'] as const).map((v) => (
+                <option key={v} value={v}>
+                  {t(`routing.geoSources.${v}`)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        {s.geo.source === 'custom' && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="geoip.dat">{(id) => <Input id={id} value={s.geo.geoipUrl} onChange={(e) => edit((d) => (d.geo.geoipUrl = e.target.value))} placeholder="https://…/geoip.dat" />}</Field>
+            <Field label="geosite.dat">{(id) => <Input id={id} value={s.geo.geositeUrl} onChange={(e) => edit((d) => (d.geo.geositeUrl = e.target.value))} placeholder="https://…/geosite.dat" />}</Field>
+          </div>
+        )}
+        <ToggleRow title={t('routing.geoAuto')} hint={t('routing.geoAutoHint')} checked={s.geo.autoUpdate} onChange={(v) => edit((d) => (d.geo.autoUpdate = v))} />
+        <div className="rounded-xl bg-muted/60 p-3.5 text-xs text-muted-foreground">
+          <div>
+            {t('routing.geoUpdated')}: {fmt(st.lastUpdate)} {st.lastSource && `· ${t(`routing.geoSources.${st.lastSource}`, { defaultValue: st.lastSource })}`}
+          </div>
+          <div>
+            {st.files.map((f) => `${f.name} ${formatBytes(f.size, lng)}`).join(' · ') || t('routing.geoNone')}
+          </div>
+          {st.lastError && <div className="mt-1 text-destructive">{t('routing.geoError', { error: st.lastError })}</div>}
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" size="sm" disabled={update.isPending} onClick={() => update.mutate()}>
+            <RefreshCw className={'h-4 w-4 ' + (update.isPending ? 'animate-spin' : '')} />
+            {update.isPending ? t('routing.geoUpdating') : t('routing.geoUpdateNow')}
+          </Button>
+          {update.isSuccess && <span className="text-xs text-muted-foreground">{update.data.changed ? t('routing.geoChanged') : t('routing.geoSame')}</span>}
+          {update.isError && <span className="text-xs text-destructive">{update.error instanceof ApiError ? update.error.message : t('common.error')}</span>}
+        </div>
+        <p className="text-xs text-muted-foreground">{t('routing.geoSaveFirst')}</p>
+      </div>
+    </Section>
+  )
+}

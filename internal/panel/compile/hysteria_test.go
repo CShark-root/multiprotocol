@@ -19,10 +19,10 @@ func TestHysteriaState(t *testing.T) {
 	}
 	users := []store.User{{ID: 3, UUID: "uuid-3"}}
 
-	if cfg, _ := Hysteria([]store.Inbound{inbound(1, "xhttp")}, users); cfg != nil {
+	if cfg, _ := Hysteria([]store.Inbound{inbound(1, "xhttp")}, users, DefaultRouting()); cfg != nil {
 		t.Fatal("VLESS inbounds must not produce a Hysteria state")
 	}
-	cfg, err := Hysteria([]store.Inbound{hy, inbound(1, "xhttp")}, users)
+	cfg, err := Hysteria([]store.Inbound{hy, inbound(1, "xhttp")}, users, DefaultRouting())
 	if err != nil {
 		t.Fatal(err)
 	}

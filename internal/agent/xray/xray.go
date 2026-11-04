@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,8 +24,8 @@ type Adapter struct {
 	version string
 }
 
-// New expects the geoip/geosite .dat files next to bin.
-func New(bin, dir, apiAddr string, log *slog.Logger) *Adapter {
+// New reads the geoip/geosite .dat files from assetDir.
+func New(bin, dir, assetDir, apiAddr string, log *slog.Logger) *Adapter {
 	return &Adapter{
 		apiAddr: apiAddr,
 		runner: core.NewRunner(core.Spec{
@@ -36,7 +35,7 @@ func New(bin, dir, apiAddr string, log *slog.Logger) *Adapter {
 			Config:   "config.json",
 			Args:     []string{"run", "-c", "{config}"},
 			TestArgs: []string{"run", "-test", "-c", "{config}"},
-			Env:      []string{"XRAY_LOCATION_ASSET=" + filepath.Dir(bin)},
+			Env:      []string{"XRAY_LOCATION_ASSET=" + assetDir},
 			Log:      log.With("source", "xray"),
 		}),
 	}
@@ -160,3 +159,6 @@ func parseStats(out []byte) ([]agent.TrafficDelta, error) {
 	}
 	return deltas, nil
 }
+
+// Restart reloads the geo databases.
+func (a *Adapter) Restart() error { return a.runner.Restart() }

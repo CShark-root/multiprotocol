@@ -33,6 +33,8 @@ type Deps struct {
 	Journal    *journal.Hub
 	Store      *store.Store // read-only views: logs, events, audit
 	Scanner    *service.Scanner
+	Routing    *service.Routing
+	Reboot     func() error // nil where rebooting is not possible (dev, tests)
 	Panel      PanelConfig
 	Agent      *agent.Agent // nil when the panel runs without a local agent
 	Web        fs.FS        // built frontend (web/dist)
@@ -78,6 +80,8 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/system", s.system)
+				r.Post("/system/restart-cores", s.restartCores)
+				r.Post("/system/reboot", s.rebootServer)
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/", s.listUsers)
 					r.Post("/", s.createUser)
@@ -90,6 +94,16 @@ func New(d Deps) http.Handler {
 					r.Post("/{id}/reset-traffic", s.resetUserTraffic)
 				})
 				r.Get("/online", s.online)
+				r.Route("/routing", func(r chi.Router) {
+					r.Get("/", s.getRouting)
+					r.Put("/", s.saveRouting)
+					r.Post("/warp", s.registerWarp)
+					r.Post("/warp/license", s.warpLicense)
+					r.Post("/warp/check", s.checkWarp)
+					r.Delete("/warp", s.deleteWarp)
+					r.Post("/geo/update", s.updateGeo)
+					r.Get("/geo/codes", s.geoCodes)
+				})
 				r.Get("/stats/traffic", s.trafficStats)
 				r.Get("/account", s.account)
 				r.Post("/account/password", s.changePassword)

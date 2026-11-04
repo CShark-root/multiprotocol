@@ -42,3 +42,12 @@ export function fromDateInput(value: string): string | null {
   if (!value) return null
   return new Date(`${value}T23:59:59`).toISOString()
 }
+
+/** Bytes per second -> "12.4 Mbit/s" (link speeds are quoted in bits). */
+export function formatBitrate(bytesPerSec: number, locale: string): string {
+  const bits = Math.max(0, bytesPerSec) * 8
+  const units = locale.startsWith('ru') ? ['бит/с', 'Кбит/с', 'Мбит/с', 'Гбит/с'] : ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s']
+  const i = bits < 1 ? 0 : Math.min(units.length - 1, Math.floor(Math.log10(bits) / 3))
+  const v = bits / 1000 ** i
+  return `${v.toLocaleString(locale, { maximumFractionDigits: v < 10 ? 1 : 0 })} ${units[i]}`
+}

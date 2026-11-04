@@ -109,3 +109,17 @@ func (a *Agent) Health(ctx context.Context) NodeHealth {
 	}
 	return h
 }
+
+// RestartCores restarts every running core with its current config (after
+// a geo database update, or from the dashboard).
+func (a *Agent) RestartCores() error {
+	var errs []error
+	for _, ad := range a.adapters {
+		if r, ok := ad.(interface{ Restart() error }); ok {
+			if err := r.Restart(); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", ad.Name(), err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}

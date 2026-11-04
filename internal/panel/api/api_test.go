@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -63,6 +64,7 @@ func newClient(t *testing.T) *client {
 		Users:    service.NewUsers(st, nil),
 		Inbounds: service.NewInbounds(st, nil, 1),
 		Events:   service.NewEvents(st),
+		Routing:  service.NewRouting(st, service.NewEvents(st), t.TempDir(), nil, nil, slog.Default()),
 		Journal:  journal.NewHub(st),
 		Store:    st,
 		Agent:    agent.New(),
@@ -525,4 +527,52 @@ func TestUserStatsEndpoints(t *testing.T) {
 	if !strings.Contains(string(body), "user.extend") || !strings.Contains(string(body), "user.reset_traffic") {
 		t.Fatalf("audit: %d %s", code, body)
 	}
+}
+
+func TestRoutingEndpoints(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	got := c.expect(200, "GET", "/api/routing", nil)
+	if p := got["presets"].(map[string]any); p["blockPrivate"] != true || got["warp"].(map[string]any)["registered"] != false {
+		t.Fatalf("defaults: %v", got)
+	}
+	body := map[string]any{
+		"presets": map[string]any{"blockPrivate": true, "blockAds": true, "warpServices": []string{"openai"}},
+		"rules":   []map[string]any{{"name": "ru", "enabled": true, "match": []string{"example.ru", "geoip:ru"}, "outbound": "direct"}},
+		"warp":    map[string]any{"mode": "off"},
+		"dns":     map[string]any{"upstream": "quad9", "strategy": "ipv4"},
+		"geo":     map[string]any{"source": "runetfreedom", "autoUpdate": true},
+	}
+	got = c.expect(200, "PUT", "/api/routing", body)
+	rule := got["rules"].([]any)[0].(map[string]any)
+	if rule["match"].([]any)[0] != "domain:example.ru" || rule["support"].(map[string]any)["hysteria"] != "full" || rule["id"] == "" {
+		t.Fatalf("saved rule: %v", rule)
+	}
+	// WARP cannot be switched on before it is registered.
+	body["warp"] = map[string]any{"mode": "rules"}
+	c.expect(400, "PUT", "/api/routing", body)
+	body["warp"] = map[string]any{"mode": "off"}
+	body["rules"] = []map[string]any{{"enabled": true, "outbound": "block"}}
+	c.expect(400, "PUT", "/api/routing", body)
+	// The device and bridge are never taken from the request.
+	body["rules"] = []map[string]any{}
+	body["bridge"] = map[string]any{"port": 1}
+	c.expect(400, "PUT", "/api/routing", body)
+	c.expect(409, "POST", "/api/routing/warp/license", map[string]string{"license": "abcdefgh-12345678"})
+	if code, b := c.json("GET", "/api/routing/geo/codes?q=ru", nil); code != 200 || string(b) != "[]\n" && string(b) != "[]" {
+		t.Fatalf("codes: %d %s", code, b)
+	}
+	code, b := c.json("GET", "/api/audit", nil)
+	if !strings.Contains(string(b), "routing.update") {
+		t.Fatalf("audit: %d %s", code, b)
+	}
+}
+
+func TestServerActions(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	c.expect(204, "POST", "/api/system/restart-cores", nil)
+	// The test server has no reboot hook; the password is checked first
+	// only where rebooting is possible.
+	c.expect(501, "POST", "/api/system/reboot", map[string]string{"password": "a-long-enough-password"})
 }

@@ -22,6 +22,31 @@ install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 [[ -x /usr/local/lib/panel/hysteria/hysteria ]] || bash "$SRC/install-hysteria.sh"
 [[ -x /usr/local/lib/panel/sing-box/sing-box ]] || bash "$SRC/install-singbox.sh"
 
+# The one extra right the panel gets: rebooting the machine from the
+# dashboard (logind asks polkit). "multiple-sessions" covers an open SSH login.
+if [[ -d /etc/polkit-1/localauthority ]]; then # polkit 0.105 (Ubuntu 22.04)
+  mkdir -p /etc/polkit-1/localauthority/50-local.d
+  cat > /etc/polkit-1/localauthority/50-local.d/50-panel-reboot.pkla <<'PKLA'
+[Let the panel service reboot the server]
+Identity=unix-user:panel
+Action=org.freedesktop.login1.reboot;org.freedesktop.login1.reboot-multiple-sessions
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+fi
+if [[ -d /etc/polkit-1/rules.d ]]; then # polkit 121+ (newer releases)
+  cat > /etc/polkit-1/rules.d/50-panel-reboot.rules <<'RULES'
+polkit.addRule(function (action, subject) {
+  if (subject.user === "panel" &&
+      (action.id === "org.freedesktop.login1.reboot" ||
+       action.id === "org.freedesktop.login1.reboot-multiple-sessions")) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+fi
+
 systemctl daemon-reload
 systemctl enable panel >/dev/null 2>&1
 systemctl restart panel

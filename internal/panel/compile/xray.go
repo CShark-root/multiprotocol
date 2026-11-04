@@ -5,8 +5,10 @@ package compile
 
 import (
 	"encoding/json"
+	"net"
 	"strconv"
 
+	"panel/internal/panel/routing"
 	"panel/internal/panel/store"
 )
 
@@ -36,15 +38,41 @@ var xrayProtocols = map[string]bool{"vless": true, "trojan": true, "vmess": true
 
 // Xray builds the Xray config for the enabled inbounds and active users.
 // It returns nil when there is nothing to serve, meaning "stop the core".
-func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte, error) {
+// With WARP in use Xray also carries the loopback bridge other cores reach
+// WARP through, so it runs even without inbounds of its own.
+func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routing) ([]byte, error) {
 	var ins []any
 	for _, ib := range inbounds {
 		if ib.Enabled && xrayProtocols[ib.Protocol] {
 			ins = append(ins, xrayInbound(ib, users))
 		}
 	}
-	if len(ins) == 0 {
+	bridge := rt.usesWarp() && rt.Bridge.Port > 0
+	if len(ins) == 0 && !bridge {
 		return nil, nil
+	}
+	var rules []any
+	if bridge {
+		ins = append(ins, map[string]any{
+			"tag": "warp-bridge", "listen": "127.0.0.1", "port": rt.Bridge.Port, "protocol": "socks",
+			"settings": map[string]any{
+				"auth":     "password",
+				"accounts": []any{map[string]any{"user": rt.Bridge.User, "pass": rt.Bridge.Password}},
+				"udp":      true,
+			},
+		})
+		rules = append(rules, map[string]any{"inboundTag": []string{"warp-bridge"}, "outboundTag": routing.WARP})
+	}
+	needIP := false
+	for _, r := range rt.Rules {
+		xr, usesIP := xrayRules(r)
+		rules = append(rules, xr...)
+		needIP = needIP || usesIP
+	}
+	domainStrategy := "AsIs"
+	if needIP {
+		// Let geoip and CIDR rules see the address of a domain request.
+		domainStrategy = "IPIfNonMatch"
 	}
 	cfg := map[string]any{
 		"log": map[string]any{"loglevel": "warning", "access": "none"},
@@ -59,21 +87,130 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte,
 				"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true},
 			},
 		},
-		"inbounds": ins,
-		"outbounds": []any{
-			map[string]any{"tag": "direct", "protocol": "freedom"},
-			map[string]any{"tag": "block", "protocol": "blackhole"},
-		},
-		"routing": map[string]any{
-			"domainStrategy": "AsIs",
-			"rules": []any{
-				map[string]any{"ip": privateCIDRs, "outboundTag": "block"},
-				map[string]any{"protocol": []string{"bittorrent"}, "outboundTag": "block"},
-				map[string]any{"port": "25", "network": "tcp", "outboundTag": "block"},
-			},
-		},
+		"inbounds":  ins,
+		"outbounds": xrayOutbounds(rt),
+		"routing":   map[string]any{"domainStrategy": domainStrategy, "rules": rules},
+	}
+	if dns := xrayDNS(rt.DNS); dns != nil {
+		cfg["dns"] = dns
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// xrayOutbounds lists the outbounds with the final one first: Xray sends
+// whatever no rule matched to the first outbound.
+func xrayOutbounds(rt Routing) []any {
+	direct := map[string]any{"tag": routing.Direct, "protocol": "freedom"}
+	if s := freedomStrategy(rt.DNS); s != "" {
+		direct["streamSettings"] = map[string]any{"sockopt": map[string]any{"domainStrategy": s}}
+	}
+	outs := []any{
+		direct,
+		map[string]any{"tag": routing.Block, "protocol": "blackhole"},
+		map[string]any{"tag": routing.IPv4, "protocol": "freedom", "streamSettings": map[string]any{"sockopt": map[string]any{"domainStrategy": "UseIPv4"}}},
+	}
+	if w := rt.Warp; w != nil {
+		addrs := []string{}
+		for _, a := range []string{w.Address4, w.Address6} {
+			if a != "" {
+				addrs = append(addrs, a)
+			}
+		}
+		strategy := "ForceIPv4v6"
+		if rt.DNS.Strategy == routing.OnlyIPv4 {
+			strategy = "ForceIPv4"
+		}
+		outs = append(outs, map[string]any{
+			"tag": routing.WARP, "protocol": "wireguard",
+			"settings": map[string]any{
+				"secretKey": w.PrivateKey,
+				"address":   addrs,
+				"peers": []any{map[string]any{
+					"publicKey": w.PeerPublicKey, "endpoint": warpEndpoint(w.Endpoint),
+					"allowedIPs": []string{"0.0.0.0/0", "::/0"},
+				}},
+				"reserved":       w.Reserved,
+				"mtu":            warpMTU,
+				"domainStrategy": strategy,
+			},
+		})
+	}
+	for i, o := range outs {
+		if o.(map[string]any)["tag"] == rt.Final {
+			outs[0], outs[i] = outs[i], outs[0]
+			break
+		}
+	}
+	return outs
+}
+
+// freedomStrategy makes the direct outbound resolve with Xray's own DNS
+// (and its IPv4/IPv6 preference); with the system resolver it stays AsIs.
+func freedomStrategy(d routing.DNSSettings) string {
+	if _, ok := d.Server(); !ok {
+		return ""
+	}
+	switch d.Strategy {
+	case routing.OnlyIPv4:
+		return "UseIPv4"
+	case routing.BothIPs:
+		return "UseIP"
+	}
+	return "UseIPv4v6"
+}
+
+func xrayDNS(d routing.DNSSettings) map[string]any {
+	srv, ok := d.Server()
+	if !ok {
+		return nil
+	}
+	server := srv.URL
+	if server == "" {
+		server = srv.Host
+	}
+	q := "UseIP"
+	if d.Strategy == routing.OnlyIPv4 {
+		q = "UseIPv4"
+	}
+	return map[string]any{"servers": []string{server}, "queryStrategy": q}
+}
+
+// xrayRules translates one rule. Inside an Xray rule all fields must match,
+// so a rule with both domains and IPs becomes two rules (our match list is
+// "any of").
+func xrayRules(r routing.Final) (rules []any, usesIP bool) {
+	domains, ips := split(r.Match)
+	base := func() map[string]any {
+		m := map[string]any{"outboundTag": r.Outbound}
+		if r.Ports != "" {
+			m["port"] = r.Ports
+		}
+		if r.Network != "" {
+			m["network"] = r.Network
+		}
+		if len(r.Protocols) > 0 {
+			m["protocol"] = r.Protocols
+		}
+		if len(r.Users) > 0 {
+			m["user"] = r.Users
+		}
+		return m
+	}
+	if len(domains) > 0 {
+		m := base()
+		m["domain"] = domains
+		rules = append(rules, m)
+	}
+	if len(ips) > 0 {
+		m := base()
+		m["ip"] = ips
+		rules = append(rules, m)
+		usesIP = true
+	}
+	if len(r.Match) == 0 {
+		rules = append(rules, base())
+	}
+	return rules, usesIP
 }
 
 func xrayInbound(ib store.Inbound, users []store.User) map[string]any {
@@ -198,4 +335,19 @@ func realityStream(ib store.Inbound) map[string]any {
 		stream["network"] = "raw"
 	}
 	return stream
+}
+
+// warpMTU leaves room below WARP's nominal 1280: on some paths full-size
+// packets vanish, which shows up as TLS handshakes that never finish (a
+// modern ClientHello needs two segments).
+const warpMTU = 1200
+
+// warpEndpoint pins the peer to an IPv4 address: the hostname resolves to
+// IPv6 first, which fails on servers without an IPv6 route.
+func warpEndpoint(ep string) string {
+	host, port, err := net.SplitHostPort(ep)
+	if err != nil || net.ParseIP(host) == nil {
+		return "162.159.192.1:2408"
+	}
+	return net.JoinHostPort(host, port)
 }

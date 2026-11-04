@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
-import { Check, Clock, Cpu, MemoryStick, Wifi } from 'lucide-react'
-import { api } from '@/lib/api'
-import { formatBytes, formatDuration } from '@/lib/utils'
-import { Badge, Card, PageHeader } from '@/components/ui'
+import { ArrowDown, ArrowUp, Check, Clock, Cpu, Gauge, MemoryStick, Power, RotateCw, Wifi } from 'lucide-react'
+import { ApiError, api } from '@/lib/api'
+import { formatBitrate, formatBytes, formatDuration } from '@/lib/utils'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader } from '@/components/ui'
 import { TrafficChart } from '@/components/TrafficChart'
 
 function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; value: string; hint?: string }) {
@@ -24,7 +24,7 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
 export function DashboardPage() {
   const { t, i18n } = useTranslation()
   const { admin } = useRouteContext({ from: '/_app' })
-  const system = useQuery({ queryKey: ['system'], queryFn: api.system, refetchInterval: 10_000 })
+  const system = useQuery({ queryKey: ['system'], queryFn: api.system, refetchInterval: 5_000 })
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
   const online = useQuery({ queryKey: ['online'], queryFn: api.online, refetchInterval: 10_000 })
   const traffic = useQuery({ queryKey: ['traffic', 30], queryFn: () => api.trafficByDay(30), refetchInterval: 60_000 })
@@ -40,13 +40,30 @@ export function DashboardPage() {
     <>
       <PageHeader title={t('dashboard.hello', { name: admin.username })} subtitle={t('dashboard.subtitle')} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
           icon={<Wifi className="h-4 w-4" />}
           label={t('dashboard.online')}
           value={online.data ? String(online.data.length) : '—'}
           hint={t('dashboard.onlineHint', { count: users.data?.length ?? 0, active: activeUsers })}
         />
+        <Card>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Gauge className="h-4 w-4" />
+            {t('dashboard.speed')}
+          </div>
+          <div className="mt-3 space-y-0.5 text-lg font-semibold tracking-tight">
+            <div className="flex items-center gap-1.5" title="in">
+              <ArrowDown className="h-4 w-4 text-muted-foreground" />
+              {sys?.netIface ? formatBitrate(sys.netRxBps, lng) : '—'}
+            </div>
+            <div className="flex items-center gap-1.5" title="out">
+              <ArrowUp className="h-4 w-4 text-muted-foreground" />
+              {sys?.netIface ? formatBitrate(sys.netTxBps, lng) : '—'}
+            </div>
+          </div>
+          {sys?.netIface && <div className="mt-1 text-xs text-muted-foreground">{t('dashboard.speedHint', { iface: sys.netIface })}</div>}
+        </Card>
         <Stat
           icon={<MemoryStick className="h-4 w-4" />}
           label={t('dashboard.memory')}
@@ -106,6 +123,7 @@ export function DashboardPage() {
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">{t('dashboard.coresEmpty')}</p>
           )}
+          <ServerActions hasAgent={Boolean(agent)} />
         </Card>
 
         <Card>
@@ -131,5 +149,108 @@ export function DashboardPage() {
         </Card>
       </div>
     </>
+  )
+}
+
+function ServerActions({ hasAgent }: { hasAgent: boolean }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [confirmCores, setConfirmCores] = useState(false)
+  const [rebootOpen, setRebootOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [rebooting, setRebooting] = useState(false)
+  const cores = useMutation({
+    mutationFn: api.restartCores,
+    onSettled: () => {
+      setConfirmCores(false)
+      qc.invalidateQueries({ queryKey: ['system'] })
+    },
+  })
+  const reboot = useMutation({
+    mutationFn: () => api.reboot(password),
+    onSuccess: () => {
+      setRebootOpen(false)
+      setRebooting(true)
+    },
+  })
+  const rebootError =
+    reboot.error instanceof ApiError
+      ? reboot.error.code === 'wrong_password'
+        ? t('dashboard.wrongPassword')
+        : reboot.error.message
+      : reboot.isError
+        ? t('common.error')
+        : ''
+
+  // While the machine is down every request fails; once the panel answers
+  // again, reload so the page picks up the fresh state.
+  useEffect(() => {
+    if (!rebooting) return
+    let seenDown = false
+    const id = setInterval(async () => {
+      try {
+        await api.authState()
+        if (seenDown) window.location.reload()
+      } catch {
+        seenDown = true
+      }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [rebooting])
+
+  if (rebooting) {
+    return <p className="mt-4 rounded-xl bg-accent px-3.5 py-2.5 text-sm text-accent-foreground">{t('dashboard.rebooting')}</p>
+  }
+  return (
+    <div className="mt-4 border-t pt-4">
+      {confirmCores ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span className="text-muted-foreground">{t('dashboard.restartCoresConfirm')}</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setConfirmCores(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button size="sm" disabled={cores.isPending} onClick={() => cores.mutate()}>
+              {t('dashboard.restartCores')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" disabled={!hasAgent} onClick={() => setConfirmCores(true)}>
+            <RotateCw className="h-4 w-4" />
+            {t('dashboard.restartCores')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setRebootOpen(true)}>
+            <Power className="h-4 w-4" />
+            {t('dashboard.rebootServer')}
+          </Button>
+        </div>
+      )}
+      {cores.isError && <p className="mt-2 text-sm text-destructive">{cores.error instanceof ApiError ? cores.error.message : t('common.error')}</p>}
+      {cores.isSuccess && !confirmCores && <p className="mt-2 text-xs text-muted-foreground">{t('dashboard.coresRestarted')}</p>}
+
+      <Dialog open={rebootOpen} onClose={() => setRebootOpen(false)} title={t('dashboard.rebootTitle')} description={t('dashboard.rebootText')}>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            reboot.mutate()
+          }}
+        >
+          <Field label={t('dashboard.rebootPassword')} error={rebootError || undefined}>
+            {(id) => <Input id={id} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />}
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setRebootOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" variant="danger" disabled={reboot.isPending || !password}>
+              {t('dashboard.rebootNow')}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </div>
   )
 }

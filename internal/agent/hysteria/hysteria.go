@@ -425,3 +425,14 @@ func randomHex(n int) string {
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// Restart reloads the geo databases of every running instance.
+func (a *Adapter) Restart() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var errs []error
+	for _, in := range a.instances {
+		errs = append(errs, in.runner.Restart())
+	}
+	return errors.Join(errs...)
+}
