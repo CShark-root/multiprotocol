@@ -348,6 +348,11 @@ export const en: Messages = {
     disabledUser: 'This user is not active right now — the links exist, but the server will not let them in.',
   },
   settings: {
+    tab_access: 'Panel access',
+    tab_security: 'Security',
+    tab_maintenance: 'Maintenance',
+    confirmTitle: 'Confirm with your password',
+    totpDisableTitle: 'Turn two-factor authentication off?',
     groupAccess: 'Panel access',
     groupSecurity: 'Security',
     groupMaintenance: 'Maintenance',
@@ -593,6 +598,7 @@ export const en: Messages = {
     hint: 'Users, inbounds with their keys, routing, WARP, the domain and the panel address in one file. Keep it like a password.',
     download: 'Download',
     done: 'Downloaded.',
+    confirm: 'The file holds every key and secret address, hence the password.',
     restoreHint: 'Restoring on a new server: stop the panel, run panel restore with this file, start the panel (see docs/migration.md).',
   },
   update: {
@@ -602,6 +608,7 @@ export const en: Messages = {
     source: 'Updates come from github.com/{{repo}}',
     checkFailed: 'Could not check: {{error}}',
     check: 'Check',
+    checking: 'Checking the version…',
     updateTo: 'Update to {{version}}',
     whatsNew: 'What’s new',
     running: 'Updating… The panel restarts; this page reloads by itself.',

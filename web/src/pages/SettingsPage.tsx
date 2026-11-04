@@ -3,55 +3,147 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Download, Globe, KeyRound, Monitor, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
-import { Badge, Button, Card, Field, Input, PageHeader, Select } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
+import { cn } from '@/lib/utils'
+
+const tabs = ['access', 'security', 'maintenance'] as const
+type Tab = (typeof tabs)[number]
+
+function savedTab(): Tab {
+  try {
+    const v = localStorage.getItem('settings.tab')
+    return tabs.includes(v as Tab) ? (v as Tab) : 'access'
+  } catch {
+    return 'access'
+  }
+}
 
 export function SettingsPage() {
   const { t } = useTranslation()
+  const [tab, setTab] = useState<Tab>(savedTab)
+  const choose = (v: Tab) => {
+    setTab(v)
+    try {
+      localStorage.setItem('settings.tab', v)
+    } catch {
+      // private mode: the tab is just not remembered
+    }
+  }
   return (
     <>
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
-      <div className="space-y-8">
-        <Group title={t('settings.groupAccess')}>
-          <AddressCard />
-          <DomainCard />
-        </Group>
-        <Group title={t('settings.groupSecurity')}>
-          <TotpCard />
-          <div className="space-y-4">
-            <PasswordCard />
-            <SessionsCard />
-          </div>
-        </Group>
-        <Group title={t('settings.groupMaintenance')}>
-          <UpdateCard />
-          <BackupCard />
-        </Group>
+      <div className="mx-auto max-w-3xl">
+        <div role="tablist" className="mb-5 flex gap-1 rounded-2xl border bg-card p-1">
+          {tabs.map((v) => (
+            <button
+              key={v}
+              role="tab"
+              type="button"
+              aria-selected={tab === v}
+              onClick={() => choose(v)}
+              className={cn(
+                'flex-1 rounded-xl px-3 py-2 text-sm transition',
+                tab === v ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t(`settings.tab_${v}`)}
+            </button>
+          ))}
+        </div>
+        <div className="space-y-4">
+          {tab === 'access' && (
+            <>
+              <AddressCard />
+              <DomainCard />
+            </>
+          )}
+          {tab === 'security' && (
+            <>
+              <TotpCard />
+              <PasswordCard />
+              <SessionsCard />
+            </>
+          )}
+          {tab === 'maintenance' && (
+            <>
+              <UpdateCard />
+              <BackupCard />
+            </>
+          )}
+        </div>
       </div>
     </>
   )
 }
 
-// A titled row of cards: two side by side on wide screens, aligned at the top.
-function Group({ title, children }: { title: string; children: ReactNode }) {
+function Section({ icon, title, hint, actions, children }: { icon: ReactNode; title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <section>
-      <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h2>
-      <div className="grid items-start gap-4 lg:grid-cols-2">{children}</div>
-    </section>
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-accent-foreground">{icon}</span>
+            <h2 className="font-semibold">{title}</h2>
+          </div>
+          {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
+      </div>
+      <div className="mt-4">{children}</div>
+    </Card>
   )
 }
 
-function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
+/** Asks for the admin password right before a sensitive action. */
+function PasswordPrompt({
+  open,
+  title,
+  text,
+  confirm,
+  danger,
+  busy,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean
+  title: string
+  text?: string
+  confirm: string
+  danger?: boolean
+  busy?: boolean
+  error?: string
+  onConfirm: (password: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const [password, setPassword] = useState('')
+  useEffect(() => {
+    if (!open) setPassword('')
+  }, [open])
   return (
-    <Card>
-      <div className="flex items-center gap-2.5">
-        <span className="text-accent-foreground">{icon}</span>
-        <h2 className="font-semibold">{title}</h2>
-      </div>
-      {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
-      <div className="mt-4">{children}</div>
-    </Card>
+    <Dialog open={open} onClose={onClose} title={title} description={text}>
+      <form
+        className="space-y-4"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault()
+          onConfirm(password)
+        }}
+      >
+        <Field label={t('settings.currentPassword')} error={error}>
+          {(id) => <Input id={id} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus required />}
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" variant={danger ? 'danger' : 'primary'} disabled={busy || !password}>
+            {confirm}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 
@@ -69,7 +161,7 @@ function AddressCard() {
   const { t } = useTranslation()
   const q = useQuery({ queryKey: ['settings', 'panel'], queryFn: api.settings.panel })
   const [form, setForm] = useState<PanelSettings | null>(null)
-  const [password, setPassword] = useState('')
+  const [asking, setAsking] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [restarting, setRestarting] = useState(false)
   useEffect(() => {
@@ -77,10 +169,12 @@ function AddressCard() {
   }, [q.data, form])
 
   const save = useMutation({
-    mutationFn: () => api.settings.savePanel({ ...form!, password }),
+    mutationFn: (password: string) => api.settings.savePanel({ ...form!, password }),
+    // A port or address problem is shown at its field: close the prompt.
+    onError: (e) => e instanceof ApiError && ['port', 'publicHost'].includes(e.field ?? '') && setAsking(false),
     onSuccess: (r) => {
       setNewUrl(r.url)
-      setPassword('')
+      setAsking(false)
       q.refetch()
     },
   })
@@ -97,7 +191,8 @@ function AddressCard() {
         className="space-y-4"
         onSubmit={(e: FormEvent) => {
           e.preventDefault()
-          save.mutate()
+          save.reset()
+          setAsking(true)
         }}
       >
         <Field label={t('settings.publicHost')} hint={t('settings.publicHostHint')} error={err('publicHost')}>
@@ -128,14 +223,22 @@ function AddressCard() {
             )}
           </Field>
         ))}
-        <Field label={t('settings.confirmPassword')} hint={t('settings.confirmPasswordHint')} error={err('password') && t('settings.wrongPassword')}>
-          {(id) => <Input id={id} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />}
-        </Field>
-        {generalError && <p className="text-sm text-destructive">{generalError}</p>}
+        {!asking && generalError && <p className="text-sm text-destructive">{generalError}</p>}
         <Button type="submit" disabled={save.isPending}>
           {t('settings.save')}
         </Button>
       </form>
+
+      <PasswordPrompt
+        open={asking}
+        title={t('settings.confirmTitle')}
+        text={t('settings.confirmPasswordHint')}
+        confirm={t('settings.save')}
+        busy={save.isPending}
+        error={err('password') ? t('settings.wrongPassword') : generalError || undefined}
+        onConfirm={(pw) => save.mutate(pw)}
+        onClose={() => setAsking(false)}
+      />
 
       {(newUrl || q.data.pending) && (
         <div className="mt-4 space-y-3 rounded-xl bg-accent p-4 text-sm text-accent-foreground">
@@ -211,6 +314,7 @@ function TotpCard() {
   const qc = useQueryClient()
   const account = useQuery({ queryKey: ['account'], queryFn: api.account.get })
   const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null)
+  const [disabling, setDisabling] = useState(false)
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const refresh = () => qc.invalidateQueries({ queryKey: ['account'] })
@@ -226,6 +330,7 @@ function TotpCard() {
   const disable = useMutation({
     mutationFn: () => api.account.totpDisable(password, code),
     onSuccess: () => {
+      setDisabling(false)
       setPassword('')
       setCode('')
       refresh()
@@ -286,26 +391,35 @@ function TotpCard() {
         </form>
       )}
       {on && (
+        <Button className="mt-4" variant="secondary" size="sm" onClick={() => setDisabling(true)}>
+          {t('settings.totpDisable')}
+        </Button>
+      )}
+      <Dialog open={disabling} onClose={() => setDisabling(false)} title={t('settings.totpDisableTitle')} description={t('settings.totpDisableHint')}>
         <form
-          className="mt-4 space-y-3"
+          className="space-y-4"
           onSubmit={(e: FormEvent) => {
             e.preventDefault()
             disable.mutate()
           }}
         >
-          <p className="text-xs text-muted-foreground">{t('settings.totpDisableHint')}</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t('settings.currentPassword')}>
-              {(id) => <Input id={id} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />}
+              {(id) => <Input id={id} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus required />}
             </Field>
             <Field label={t('settings.code')}>{codeInput}</Field>
           </div>
           {disable.error && <p className="text-sm text-destructive">{errText(disable.error)}</p>}
-          <Button type="submit" variant="secondary" disabled={disable.isPending}>
-            {t('settings.totpDisable')}
-          </Button>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setDisabling(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" variant="danger" disabled={disable.isPending || !password || code.length !== 6}>
+              {t('settings.totpDisable')}
+            </Button>
+          </div>
         </form>
-      )}
+      </Dialog>
     </Section>
   )
 }
@@ -406,7 +520,7 @@ function DomainCard() {
   const fmt = (iso: string) => new Date(iso).toLocaleString(lng, { dateStyle: 'medium', timeStyle: 'short' })
 
   return (
-    <Section icon={<Globe className="h-5 w-5" />} title={t('domain.title')} hint={t('domain.hint')}>
+    <Section icon={<Globe className="h-4 w-4" />} title={t('domain.title')} hint={t('domain.hint')}>
       <div className="space-y-4">
         {!saved && (
           <ol className="list-decimal space-y-1 rounded-xl bg-muted/60 p-3.5 pl-8 text-sm text-muted-foreground">
@@ -530,16 +644,14 @@ function DomainCard() {
 
 function BackupCard() {
   const { t } = useTranslation()
-  const [password, setPassword] = useState('')
+  const [asking, setAsking] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
 
-  async function download(e: FormEvent) {
-    e.preventDefault()
+  async function download(password: string) {
     setBusy(true)
     setError('')
-    setDone(false)
     try {
       const res = await fetch(basePath + 'api/system/backup', {
         method: 'POST',
@@ -547,7 +659,7 @@ function BackupCard() {
         body: JSON.stringify({ password }),
       })
       if (!res.ok) {
-        setError(res.status === 403 ? t('dashboard.wrongPassword') : t('common.error'))
+        setError(res.status === 403 ? t('settings.wrongPassword') : t('common.error'))
         return
       }
       const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'multiprotocol-backup.tar.gz'
@@ -557,7 +669,7 @@ function BackupCard() {
       a.download = name
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setPassword('')
+      setAsking(false)
       setDone(true)
     } catch {
       setError(t('common.error'))
@@ -567,18 +679,32 @@ function BackupCard() {
   }
 
   return (
-    <Section icon={<Archive className="h-5 w-5" />} title={t('backup.title')} hint={t('backup.hint')}>
-      <form onSubmit={download} className="space-y-3">
-        <Field label={t('dashboard.rebootPassword')} error={error || undefined}>
-          {(id) => <Input id={id} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
-        </Field>
-        <Button type="submit" variant="secondary" disabled={busy || !password}>
+    <Section icon={<Archive className="h-4 w-4" />} title={t('backup.title')} hint={t('backup.hint')}>
+      <div className="space-y-3">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setError('')
+            setDone(false)
+            setAsking(true)
+          }}
+        >
           <Archive className="h-4 w-4" />
           {t('backup.download')}
         </Button>
         {done && <p className="text-xs text-muted-foreground">{t('backup.done')}</p>}
         <p className="text-xs text-muted-foreground">{t('backup.restoreHint')}</p>
-      </form>
+      </div>
+      <PasswordPrompt
+        open={asking}
+        title={t('backup.title')}
+        text={t('backup.confirm')}
+        confirm={t('backup.download')}
+        busy={busy}
+        error={error || undefined}
+        onConfirm={download}
+        onClose={() => setAsking(false)}
+      />
     </Section>
   )
 }
@@ -615,7 +741,12 @@ function UpdateCard() {
     else if (finished) setStarted(null) // same version (reinstall, cores only, or a failure)
   }, [d, started, finished])
 
-  if (!d) return null
+  if (!d)
+    return (
+      <Section icon={<Download className="h-4 w-4" />} title={t('update.title')}>
+        <p className="text-sm text-muted-foreground">{t('update.checking')}</p>
+      </Section>
+    )
   const latest = d.latest?.tag
   const newer = Boolean(latest && latest !== d.current)
   const busy = started !== null
@@ -625,9 +756,18 @@ function UpdateCard() {
   const cores = system.data?.localAgent?.cores ?? []
 
   return (
-    <Section icon={<Download className="h-5 w-5" />} title={t('update.title')}>
+    <Section
+      icon={<Download className="h-4 w-4" />}
+      title={t('update.title')}
+      actions={
+        <Button variant="ghost" size="sm" disabled={check.isPending || busy} onClick={() => check.mutate()}>
+          <RefreshCw className={'h-4 w-4 ' + (check.isPending ? 'animate-spin' : '')} />
+          {t('update.check')}
+        </Button>
+      }
+    >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/60 p-3.5">
+        <div className="rounded-xl bg-muted/60 p-3.5">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-base font-semibold">{d.current}</span>
@@ -641,10 +781,6 @@ function UpdateCard() {
               {d.error ? t('update.checkFailed', { error: d.error }) : t('update.source', { repo: d.repo })}
             </div>
           </div>
-          <Button variant="ghost" size="sm" disabled={check.isPending || busy} onClick={() => check.mutate()}>
-            <RefreshCw className={'h-4 w-4 ' + (check.isPending ? 'animate-spin' : '')} />
-            {t('update.check')}
-          </Button>
         </div>
 
         {busy ? (
