@@ -421,30 +421,7 @@ function DomainCard() {
             )}
           </Field>
         </div>
-        <div className="space-y-2">
-          <div className="text-sm font-medium">{t('domain.ip')}</div>
-          {(['auto', 'custom'] as const).map((m) => (
-            <label key={m} className="flex items-start gap-2.5 text-sm">
-              <input type="radio" name="ipMode" className="mt-1" checked={form.ipMode === m} onChange={() => setForm({ ...form, ipMode: m })} />
-              <span>
-                {t(`domain.ip_${m}`)}
-                <span className="block text-xs text-muted-foreground">{t(`domain.ip_${m}Hint`)}</span>
-              </span>
-            </label>
-          ))}
-          {form.ipMode === 'custom' && (
-            <Field label={t('domain.ipAddress')} error={error.ip}>
-              {(id) => <Input id={id} value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="192.168.1.150" />}
-            </Field>
-          )}
-        </div>
-        <label className="flex items-start gap-2.5 text-sm">
-          <input type="checkbox" className="mt-1" checked={form.staging} onChange={(e) => setForm({ ...form, staging: e.target.checked })} />
-          <span>
-            {t('domain.staging')}
-            <span className="block text-xs text-muted-foreground">{t('domain.stagingHint')}</span>
-          </span>
-        </label>
+        {d.ipMode === 'custom' && d.ip && <p className="text-xs text-muted-foreground">{t('domain.ipCustomNote', { ip: d.ip })}</p>}
         {error.form && <p className="text-sm text-destructive">{error.form}</p>}
         {(dirty || !saved) && (
           <Button onClick={() => save.mutate()} disabled={save.isPending || !form.name}>
