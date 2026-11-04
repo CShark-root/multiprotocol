@@ -229,6 +229,47 @@ func (a *Adapter) Traffic(ctx context.Context) ([]agent.TrafficDelta, error) {
 	return out, errors.Join(errs...)
 }
 
+// Online asks each Hysteria server's trafficStats API how many connections
+// every user has; Hysteria does not report client IPs there.
+func (a *Adapter) Online(ctx context.Context) ([]agent.OnlineEntry, error) {
+	a.mu.Lock()
+	var running []*instance
+	for _, in := range a.instances {
+		if in.runner.Running() {
+			running = append(running, in)
+		}
+	}
+	a.mu.Unlock()
+	counts := map[string]int{}
+	var errs []error
+	for _, in := range running {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+in.statsAddr+"/online", nil)
+		req.Header.Set("Authorization", in.secret)
+		resp, err := statsClient.Do(req)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		var m map[string]int
+		err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m)
+		resp.Body.Close()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for email, n := range m {
+			counts[email] += n
+		}
+	}
+	out := make([]agent.OnlineEntry, 0, len(counts))
+	for email, n := range counts {
+		if n > 0 {
+			out = append(out, agent.OnlineEntry{Email: email, Connections: n})
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
 func (a *Adapter) Health(ctx context.Context) agent.HealthStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()

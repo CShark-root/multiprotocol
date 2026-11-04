@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, CircleCheck, Info, Pause, Play, Search, ShieldAlert } from 'lucide-react'
 import { api, logStreamUrl, type AuditRecord, type LogEntry, type LogFilter, type PanelEvent } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '@/components/ui'
 
 type Tab = 'system' | 'events' | 'audit'
@@ -164,9 +164,11 @@ const severityIcon = {
   danger: <ShieldAlert className="h-4 w-4 text-destructive" />,
 }
 
-function eventText(t: (k: string, o?: Record<string, unknown>) => string, e: PanelEvent) {
+function eventText(t: (k: string, o?: Record<string, unknown>) => string, e: PanelEvent, lng: string) {
   const key = `logs.events.${e.type.replace('.', '_')}`
-  const text = t(key, { name: e.userName || '—', ...e.data, defaultValue: '' })
+  // Byte counts arrive raw; the texts get them formatted as {{bytesText}}.
+  const bytes = typeof e.data?.bytes === 'number' ? formatBytes(e.data.bytes as number, lng) : undefined
+  const text = t(key, { name: e.userName || '—', ...e.data, bytesText: bytes, defaultValue: '' })
   return text || e.type
 }
 
@@ -187,7 +189,7 @@ function EventsList() {
             <li key={e.id} className="flex items-start gap-3 border-b px-5 py-3 last:border-0">
               <span className="mt-0.5">{severityIcon[e.severity]}</span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm">{eventText(t, e)}</div>
+                <div className="text-sm">{eventText(t, e, i18n.language)}</div>
                 {e.message && <div className="mt-0.5 break-words font-mono text-xs text-muted-foreground">{e.message}</div>}
               </div>
               <span className="shrink-0 text-xs text-muted-foreground">{when(e.ts, i18n.language)}</span>

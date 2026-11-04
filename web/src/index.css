@@ -23,6 +23,9 @@
   --destructive: oklch(0.56 0.13 35);
   --destructive-soft: oklch(0.95 0.03 35);
   --ring: oklch(0.6 0.07 205);
+  /* Chart marks: the primary hue with enough chroma not to read as gray
+     (checked with the dataviz palette validator against --card). */
+  --chart: #007a99;
 }
 
 .dark {
@@ -44,6 +47,7 @@
   --destructive: oklch(0.7 0.13 35);
   --destructive-soft: oklch(0.32 0.05 35);
   --ring: oklch(0.72 0.07 205);
+  --chart: #009eb3;
 }
 
 @theme inline {

@@ -18,6 +18,7 @@ const (
 	keepFor     = 7 * 24 * time.Hour
 	keepRows    = 200_000
 	eventsKeep  = 90 * 24 * time.Hour
+	trafficDays = 400 // daily per-user traffic history
 	maxMsgBytes = 2000
 )
 
@@ -52,6 +53,17 @@ func (h *Hub) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Drain what is still queued so the last lines before a
+			// shutdown are not lost.
+			for {
+				select {
+				case e := <-h.in:
+					batch = append(batch, e)
+					continue
+				default:
+				}
+				break
+			}
 			write()
 			return
 		case e := <-h.in:
@@ -71,6 +83,7 @@ func (h *Hub) prune() {
 	now := time.Now()
 	h.store.PruneLogs(context.Background(), keepFor, keepRows, now)
 	h.store.PruneEvents(context.Background(), eventsKeep, now)
+	h.store.PruneTrafficDaily(context.Background(), now.Local().AddDate(0, 0, -trafficDays).Format(time.DateOnly))
 }
 
 // Subscribe returns new entries as they arrive. Slow readers miss entries

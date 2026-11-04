@@ -100,7 +100,7 @@ function AddressCard() {
           </Field>
         </div>
         {(['basePath', 'subPath'] as const).map((k) => (
-          <Field key={k} label={t(`settings.${k}`)} hint={t('settings.pathHint')}>
+          <Field key={k} label={t(`settings.${k}`)} hint={t(`settings.${k}Hint`)}>
             {(id) => (
               <div className="flex gap-2">
                 <Input id={id} value={form[k]} onChange={(e) => set(k, e.target.value.trim())} className="font-mono" />

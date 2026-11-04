@@ -56,7 +56,7 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte,
 		"stats": map[string]any{},
 		"policy": map[string]any{
 			"levels": map[string]any{
-				"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true},
+				"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true},
 			},
 		},
 		"inbounds": ins,

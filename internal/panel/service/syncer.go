@@ -162,6 +162,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 		return err
 	}
 	now := s.now()
+	s.applyResets(ctx, users, now)
 	active := users[:0:0]
 	statuses := make(map[int64]Status, len(users))
 	for _, u := range users {

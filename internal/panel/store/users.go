@@ -17,6 +17,7 @@ type User struct {
 	ExpireAt     *time.Time // nil = never
 	SubToken     string
 	UUID         string // VLESS credential
+	LastResetAt  time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -32,7 +33,7 @@ type UserFields struct {
 }
 
 const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, reset_period,
-	expire_at, sub_token, uuid, created_at, updated_at`
+	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at`
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY id`)
@@ -66,13 +67,23 @@ func (s *Store) GetUserBySubToken(ctx context.Context, token string) (User, erro
 	return u, notFound(err)
 }
 
-// AddTraffic adds bytes to each user's counter in one transaction.
+// AddTraffic adds bytes to each user's counter and to today's daily row
+// (server local date) in one transaction.
 func (s *Store) AddTraffic(ctx context.Context, byUser map[int64]int64, now time.Time) error {
+	day := now.Local().Format(time.DateOnly)
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		for id, bytes := range byUser {
-			if _, err := tx.ExecContext(ctx,
+			res, err := tx.ExecContext(ctx,
 				`UPDATE users SET traffic_used = traffic_used + ?, updated_at = ? WHERE id = ?`,
-				bytes, now.Unix(), id); err != nil {
+				bytes, now.Unix(), id)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				continue // user deleted meanwhile
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO traffic_daily (user_id, day, bytes) VALUES (?, ?, ?)
+				ON CONFLICT (user_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`, id, day, bytes); err != nil {
 				return err
 			}
 		}
@@ -80,12 +91,74 @@ func (s *Store) AddTraffic(ctx context.Context, byUser map[int64]int64, now time
 	})
 }
 
+// ResetTraffic zeroes a user's counter (daily history stays).
+func (s *Store) ResetTraffic(ctx context.Context, id int64, now time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET traffic_used = 0, last_reset_at = ?, updated_at = ? WHERE id = ?`,
+		now.Unix(), now.Unix(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetExpire changes only the expiry of a user.
+func (s *Store) SetExpire(ctx context.Context, id int64, expire *time.Time, now time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET expire_at = ?, updated_at = ? WHERE id = ?`,
+		unixOrNull(expire), now.Unix(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+type DayTraffic struct {
+	Day   string `json:"day"` // YYYY-MM-DD
+	Bytes int64  `json:"bytes"`
+}
+
+// TrafficByDay sums traffic per day from `from` (YYYY-MM-DD) on; userID 0
+// means all users.
+func (s *Store) TrafficByDay(ctx context.Context, userID int64, from string) ([]DayTraffic, error) {
+	q := `SELECT day, SUM(bytes) FROM traffic_daily WHERE day >= ?`
+	args := []any{from}
+	if userID != 0 {
+		q += ` AND user_id = ?`
+		args = append(args, userID)
+	}
+	rows, err := s.db.QueryContext(ctx, q+` GROUP BY day ORDER BY day`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DayTraffic{}
+	for rows.Next() {
+		var d DayTraffic
+		if err := rows.Scan(&d.Day, &d.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// PruneTrafficDaily drops daily rows older than `before` (YYYY-MM-DD).
+func (s *Store) PruneTrafficDaily(ctx context.Context, before string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM traffic_daily WHERE day < ?`, before)
+	return err
+}
+
 func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid string, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users
-		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, uuid,
-		now.Unix(), now.Unix())
+		now.Unix(), now.Unix(), now.Unix())
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -118,8 +191,15 @@ func (s *Store) UpdateUser(ctx context.Context, id int64, f UserFields, now time
 	return s.GetUser(ctx, id)
 }
 
+// DeleteUser removes a user. Their daily traffic moves into the server
+// total (user_id 0): ids can be reused, and a new user must not inherit it.
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -128,17 +208,25 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 	} else if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `INSERT INTO traffic_daily (user_id, day, bytes)
+		SELECT 0, day, bytes FROM traffic_daily WHERE user_id = ? AND true
+		ON CONFLICT (user_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM traffic_daily WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type scanner interface{ Scan(dest ...any) error }
 
 func scanUser(row scanner) (User, error) {
 	var u User
-	var enabled, created, updated int64
+	var enabled, lastReset, created, updated int64
 	var expire sql.NullInt64
 	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.ResetPeriod,
-		&expire, &u.SubToken, &u.UUID, &created, &updated)
+		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated)
 	if err != nil {
 		return User{}, err
 	}
@@ -147,7 +235,7 @@ func scanUser(row scanner) (User, error) {
 		t := fromUnix(expire.Int64)
 		u.ExpireAt = &t
 	}
-	u.CreatedAt, u.UpdatedAt = fromUnix(created), fromUnix(updated)
+	u.LastResetAt, u.CreatedAt, u.UpdatedAt = fromUnix(lastReset), fromUnix(created), fromUnix(updated)
 	return u, nil
 }
 

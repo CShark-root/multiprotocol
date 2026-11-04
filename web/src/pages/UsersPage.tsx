@@ -1,11 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Search, Smartphone, Trash2, UserPlus } from 'lucide-react'
-import { ApiError, api, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
+import { CalendarPlus, Pencil, Plus, RotateCcw, Search, Smartphone, Trash2, UserPlus } from 'lucide-react'
+import { ApiError, api, type OnlineEntry, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
 import { GiB, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
 import { ShareRow } from '@/components/share'
+import { TrafficChart } from '@/components/TrafficChart'
 import { useKindLabel } from './InboundsPage'
 
 const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'> = {
@@ -25,6 +26,9 @@ export function UsersPage() {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
+  const online = useQuery({ queryKey: ['online'], queryFn: api.online, refetchInterval: 10_000 })
+  const onlineBy = useMemo(() => new Map((online.data ?? []).map((o) => [o.userId, o])), [online.data])
+  const [details, setDetails] = useState<User | null>(null)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<User | 'new' | null>(null)
   const [deleting, setDeleting] = useState<User | null>(null)
@@ -99,7 +103,10 @@ export function UsersPage() {
                     {filtered.map((u) => (
                       <tr key={u.id} className="border-t transition hover:bg-muted/50">
                         <td className="px-5 py-3.5">
-                          <div className="font-medium">{u.name}</div>
+                          <button type="button" className="flex items-center gap-2 text-left font-medium hover:underline underline-offset-4" onClick={() => setDetails(u)}>
+                            <OnlineDot entry={onlineBy.get(u.id)} />
+                            {u.name}
+                          </button>
                           {u.note && <div className="text-xs text-muted-foreground">{u.note}</div>}
                         </td>
                         <td className="px-5 py-3.5">
@@ -143,6 +150,17 @@ export function UsersPage() {
 
       {editing && <UserDialog user={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={invalidate} />}
       {connecting && <ConnectDialog user={connecting} onClose={() => setConnecting(null)} />}
+      {details && (
+        <UserDetails
+          user={users.data?.find((u) => u.id === details.id) ?? details}
+          online={onlineBy.get(details.id)}
+          onClose={() => setDetails(null)}
+          onEdit={() => {
+            setEditing(users.data?.find((u) => u.id === details.id) ?? details)
+            setDetails(null)
+          }}
+        />
+      )}
 
       <Dialog
         open={deleting !== null}
@@ -307,6 +325,127 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
           </Button>
         </div>
       </form>
+    </Dialog>
+  )
+}
+
+function OnlineDot({ entry }: { entry?: OnlineEntry }) {
+  const { t } = useTranslation()
+  const label = entry ? t('users.onlineNow', { ips: entry.ips.join(', ') || '—' }) : t('users.offline')
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={entry ? 'h-2 w-2 shrink-0 rounded-full bg-success' : 'h-2 w-2 shrink-0 rounded-full border border-muted-foreground/50'}
+    />
+  )
+}
+
+function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: OnlineEntry; onClose: () => void; onEdit: () => void }) {
+  const { t, i18n } = useTranslation()
+  const lng = i18n.language
+  const qc = useQueryClient()
+  const traffic = useQuery({ queryKey: ['traffic', 30, user.id], queryFn: () => api.users.traffic(user.id, 30), refetchInterval: 60_000 })
+  const [confirmReset, setConfirmReset] = useState(false)
+  const done = () => {
+    qc.invalidateQueries({ queryKey: ['users'] })
+    qc.invalidateQueries({ queryKey: ['traffic'] })
+  }
+  const extend = useMutation({ mutationFn: () => api.users.extend(user.id, 30), onSuccess: done })
+  const reset = useMutation({
+    mutationFn: () => api.users.resetTraffic(user.id),
+    onSuccess: () => {
+      setConfirmReset(false)
+      done()
+    },
+  })
+  const expired = user.expireAt !== null && new Date(user.expireAt) < new Date()
+
+  return (
+    <Dialog open onClose={onClose} title={user.name} description={user.note || undefined}>
+      <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+          <div className="rounded-xl bg-muted/60 p-3">
+            <div className="text-xs text-muted-foreground">{t('users.colStatus')}</div>
+            <div className="mt-1">
+              <Badge tone={statusTone[user.status]}>{t(`users.status.${user.status}`)}</Badge>
+            </div>
+          </div>
+          <div className="rounded-xl bg-muted/60 p-3">
+            <div className="text-xs text-muted-foreground">{t('users.colTraffic')}</div>
+            <div className="mt-1 font-medium whitespace-nowrap">
+              {formatBytes(user.trafficUsed, lng)}
+              <span className="font-normal text-muted-foreground"> / {user.trafficLimit ? formatBytes(user.trafficLimit, lng) : '∞'}</span>
+            </div>
+            {user.resetPeriod !== 'none' && <div className="text-xs text-muted-foreground">{t(`users.reset.${user.resetPeriod}`)}</div>}
+          </div>
+          <div className="col-span-2 rounded-xl bg-muted/60 p-3 sm:col-span-1">
+            <div className="text-xs text-muted-foreground">{t('users.colExpire')}</div>
+            <div className={expired ? 'mt-1 font-medium text-warning' : 'mt-1 font-medium'}>
+              {user.expireAt ? formatDate(user.expireAt, lng) : t('common.never')}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border p-3.5 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <OnlineDot entry={online} />
+            {online ? t('users.online') : t('users.offline')}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {online ? t('users.onlineIps', { ips: online.ips.join(', ') || '—' }) : t('users.offlineHint')}
+          </p>
+        </div>
+
+        <div>
+          <div className="text-sm font-medium">{t('users.traffic30')}</div>
+          <div className="mt-2">{traffic.data ? <TrafficChart data={traffic.data} height={150} /> : <div className="h-[150px]" />}</div>
+        </div>
+
+        {confirmReset ? (
+          <div className="rounded-xl bg-warning-soft p-3.5 text-sm">
+            <p>{t('users.resetConfirm', { used: formatBytes(user.trafficUsed, lng) })}</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setConfirmReset(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button variant="danger" size="sm" disabled={reset.isPending} onClick={() => reset.mutate()}>
+                {t('users.resetTraffic')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!user.expireAt || extend.isPending}
+                title={user.expireAt ? undefined : t('users.extendNoExpiry')}
+                onClick={() => extend.mutate()}
+              >
+                <CalendarPlus className="h-4 w-4" />
+                {t('users.extend30')}
+              </Button>
+              <Button variant="secondary" size="sm" disabled={user.trafficUsed === 0} onClick={() => setConfirmReset(true)}>
+                <RotateCcw className="h-4 w-4" />
+                {t('users.resetTraffic')}
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                <Pencil className="h-4 w-4" />
+                {t('common.edit')}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onClose}>
+                OK
+              </Button>
+            </div>
+          </div>
+        )}
+        {(extend.isError || reset.isError) && <p className="text-sm text-destructive">{t('common.error')}</p>}
+      </div>
     </Dialog>
   )
 }

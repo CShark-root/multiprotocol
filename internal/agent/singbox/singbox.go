@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ type Adapter struct {
 	statsMu sync.Mutex
 	conns   map[string]connState // by connection id
 	pending map[string]*agent.TrafficDelta
+	online  map[string]*agent.OnlineEntry // by email, from the last poll
 }
 
 type connState struct{ up, down int64 }
@@ -166,6 +168,9 @@ type connEntry struct {
 	Upload   int64    `json:"upload"`
 	Download int64    `json:"download"`
 	Chains   []string `json:"chains"`
+	Metadata struct {
+		SourceIP string `json:"sourceIP"`
+	} `json:"metadata"`
 }
 
 func (a *Adapter) pollOnce() error {
@@ -196,6 +201,7 @@ func (a *Adapter) account(c connections) {
 	a.statsMu.Lock()
 	defer a.statsMu.Unlock()
 	seen := make(map[string]connState, len(c.Connections))
+	online := map[string]*agent.OnlineEntry{}
 	for _, conn := range c.Connections {
 		cur := connState{conn.Upload, conn.Download}
 		seen[conn.ID] = cur
@@ -203,6 +209,15 @@ func (a *Adapter) account(c connections) {
 			continue
 		}
 		email := strings.TrimPrefix(conn.Chains[0], userOutboundPrefix)
+		o := online[email]
+		if o == nil {
+			o = &agent.OnlineEntry{Email: email}
+			online[email] = o
+		}
+		o.Connections++
+		if ip := conn.Metadata.SourceIP; ip != "" && !slices.Contains(o.IPs, ip) {
+			o.IPs = append(o.IPs, ip)
+		}
 		prev := a.conns[conn.ID]
 		d := a.pending[email]
 		if d == nil {
@@ -213,6 +228,21 @@ func (a *Adapter) account(c connections) {
 		d.Down += max(0, cur.down-prev.down)
 	}
 	a.conns = seen
+	a.online = online
+}
+
+// Online is who had open connections at the last poll (at most a second ago).
+func (a *Adapter) Online(context.Context) ([]agent.OnlineEntry, error) {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+	if !a.runner.Running() {
+		return nil, nil
+	}
+	out := make([]agent.OnlineEntry, 0, len(a.online))
+	for _, o := range a.online {
+		out = append(out, *o)
+	}
+	return out, nil
 }
 
 func freeLocalAddr() (string, error) {

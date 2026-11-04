@@ -59,6 +59,19 @@ func (a *Adapter) Traffic(ctx context.Context) ([]agent.TrafficDelta, error) {
 	return parseStats(out)
 }
 
+// Online lists users with live sessions and their IPs (policy
+// statsUserOnline must be on, see compile.Xray).
+func (a *Adapter) Online(ctx context.Context) ([]agent.OnlineEntry, error) {
+	if !a.runner.Running() {
+		return nil, nil
+	}
+	out, err := a.runner.Run(ctx, 10*time.Second, "api", "statsonlineiplist", "--server="+a.apiAddr, "-all")
+	if err != nil {
+		return nil, fmt.Errorf("statsonlineiplist: %s", core.Tail(out, err))
+	}
+	return parseOnline(out)
+}
+
 func (a *Adapter) Health(ctx context.Context) agent.HealthStatus {
 	h := agent.HealthStatus{Installed: a.runner.Installed(), Running: a.runner.Running(), Message: a.runner.LastError()}
 	a.mu.Lock()
@@ -72,6 +85,36 @@ func (a *Adapter) Health(ctx context.Context) agent.HealthStatus {
 	}
 	h.Version = a.version
 	return h
+}
+
+// parseOnline reads `xray api statsonlineiplist -all`:
+// {"users":[{"email":"u3","ips":[{"ip":"1.2.3.4","lastSeen":1793791460}]}]}.
+// An empty result is "{}". Xray keeps an IP while at least one of its
+// connections is open, so the IP count stands in for the connection count.
+func parseOnline(out []byte) ([]agent.OnlineEntry, error) {
+	var resp struct {
+		Users []struct {
+			Email string `json:"email"`
+			IPs   []struct {
+				IP string `json:"ip"`
+			} `json:"ips"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, fmt.Errorf("parse statsonlineiplist output: %w", err)
+	}
+	entries := make([]agent.OnlineEntry, 0, len(resp.Users))
+	for _, u := range resp.Users {
+		if u.Email == "" || len(u.IPs) == 0 {
+			continue
+		}
+		e := agent.OnlineEntry{Email: u.Email, Connections: len(u.IPs)}
+		for _, ip := range u.IPs {
+			e.IPs = append(e.IPs, ip.IP)
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 // parseStats reads `xray api statsquery` JSON. Values come as numbers or,

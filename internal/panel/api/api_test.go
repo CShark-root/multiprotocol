@@ -487,3 +487,42 @@ func TestSPAServing(t *testing.T) {
 }
 
 func itoa(i int) string { b, _ := json.Marshal(i); return string(b) }
+
+func TestUserStatsEndpoints(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	expire := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	u := c.expect(201, "POST", "/api/users", map[string]any{"name": "phone", "expireAt": expire})
+	id := itoa(int(u["id"].(float64)))
+
+	// An expired user is extended from today, not from the old date.
+	got := c.expect(200, "POST", "/api/users/"+id+"/extend", map[string]int{"days": 30})
+	at, _ := time.Parse(time.RFC3339, got["expireAt"].(string))
+	if d := time.Until(at); d < 29*24*time.Hour || d > 31*24*time.Hour {
+		t.Fatalf("extend: expireAt %v", at)
+	}
+	c.expect(400, "POST", "/api/users/"+id+"/extend", map[string]int{"days": 0})
+	if got := c.expect(200, "POST", "/api/users/"+id+"/reset-traffic", nil); got["trafficUsed"].(float64) != 0 {
+		t.Fatalf("reset: %v", got)
+	}
+
+	code, body := c.json("GET", "/api/users/"+id+"/traffic?days=7", nil)
+	var days []map[string]any
+	json.Unmarshal(body, &days)
+	if code != 200 || len(days) != 7 || days[6]["day"] != time.Now().Format(time.DateOnly) {
+		t.Fatalf("user traffic: %d %s", code, body)
+	}
+	c.expect(400, "GET", "/api/stats/traffic?days=999", nil)
+	if code, body := c.json("GET", "/api/stats/traffic", nil); code != 200 || !strings.HasPrefix(string(body), "[") {
+		t.Fatalf("traffic: %d %s", code, body)
+	}
+	if code, body := c.json("GET", "/api/online", nil); code != 200 || strings.TrimSpace(string(body)) != "[]" {
+		t.Fatalf("online: %d %s", code, body)
+	}
+	c.expect(404, "GET", "/api/users/999/traffic", nil)
+
+	code, body = c.json("GET", "/api/audit", nil)
+	if !strings.Contains(string(body), "user.extend") || !strings.Contains(string(body), "user.reset_traffic") {
+		t.Fatalf("audit: %d %s", code, body)
+	}
+}

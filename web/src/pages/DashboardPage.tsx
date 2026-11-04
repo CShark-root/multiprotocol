@@ -2,10 +2,11 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
-import { Check, Clock, Cpu, MemoryStick, Users } from 'lucide-react'
+import { Check, Clock, Cpu, MemoryStick, Wifi } from 'lucide-react'
 import { api } from '@/lib/api'
 import { formatBytes, formatDuration } from '@/lib/utils'
 import { Badge, Card, PageHeader } from '@/components/ui'
+import { TrafficChart } from '@/components/TrafficChart'
 
 function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; value: string; hint?: string }) {
   return (
@@ -25,6 +26,9 @@ export function DashboardPage() {
   const { admin } = useRouteContext({ from: '/_app' })
   const system = useQuery({ queryKey: ['system'], queryFn: api.system, refetchInterval: 10_000 })
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
+  const online = useQuery({ queryKey: ['online'], queryFn: api.online, refetchInterval: 10_000 })
+  const traffic = useQuery({ queryKey: ['traffic', 30], queryFn: () => api.trafficByDay(30), refetchInterval: 60_000 })
+  const account = useQuery({ queryKey: ['account'], queryFn: api.account.get })
 
   const agent = system.data?.localAgent
   // memTotal is 0 when the host exposes no /proc (dev builds on Windows/macOS).
@@ -38,10 +42,10 @@ export function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
-          icon={<Users className="h-4 w-4" />}
-          label={t('dashboard.users')}
-          value={String(users.data?.length ?? '—')}
-          hint={t('dashboard.usersActive', { count: activeUsers })}
+          icon={<Wifi className="h-4 w-4" />}
+          label={t('dashboard.online')}
+          value={online.data ? String(online.data.length) : '—'}
+          hint={t('dashboard.onlineHint', { count: users.data?.length ?? 0, active: activeUsers })}
         />
         <Stat
           icon={<MemoryStick className="h-4 w-4" />}
@@ -62,6 +66,12 @@ export function DashboardPage() {
           hint={agent ? `${agent.hostname} · ${agent.os}/${agent.arch}` : t('dashboard.noAgent')}
         />
       </div>
+
+      <Card className="mt-4">
+        <h2 className="font-semibold">{t('dashboard.traffic')}</h2>
+        <p className="mb-4 text-xs text-muted-foreground">{t('dashboard.trafficHint')}</p>
+        {traffic.data ? <TrafficChart data={traffic.data} /> : <div className="h-[180px]" />}
+      </Card>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
@@ -101,17 +111,17 @@ export function DashboardPage() {
         <Card>
           <h2 className="font-semibold">{t('dashboard.security')}</h2>
           <ul className="mt-4 space-y-2.5 text-sm">
-            {(['secHttps', 'secPath', 'secCookies'] as const).map((k) => (
+            {(['secHttps', 'secPath', 'secCookies', ...(account.data?.totpEnabled ? (['sec2fa'] as const) : [])] as const).map((k) => (
               <li key={k} className="flex items-start gap-2.5">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                 {t(`dashboard.${k}`)}
               </li>
             ))}
-            {(['sec2fa', 'secMtls'] as const).map((k) => (
+            {([...(account.data?.totpEnabled ? [] : (['sec2fa'] as const)), 'secMtls'] as const).map((k) => (
               <li key={k} className="flex items-start gap-2.5 text-muted-foreground">
                 <span className="mt-1.5 ml-1 h-2 w-2 shrink-0 rounded-full border border-muted-foreground" />
                 <span className="flex-1">{t(`dashboard.${k}`)}</span>
-                <Badge tone="muted">{t('common.soon')}</Badge>
+                <Badge tone="muted">{k === 'sec2fa' ? t('dashboard.sec2faOff') : t('common.soon')}</Badge>
               </li>
             ))}
           </ul>

@@ -40,3 +40,17 @@ func TestApplyWithoutBinary(t *testing.T) {
 		t.Fatalf("stopping must always work: %v", err)
 	}
 }
+
+func TestParseOnline(t *testing.T) {
+	out := []byte(`{"users":[{"email":"u3","ips":[{"ip":"192.168.1.150","lastSeen":1793791460},{"ip":"10.0.0.2","lastSeen":1}],"traffic":{"downlink":4011570,"uplink":723}},{"email":"u9","ips":[]}]}`)
+	got, err := parseOnline(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Email != "u3" || got[0].Connections != 2 || len(got[0].IPs) != 2 || got[0].IPs[0] != "192.168.1.150" {
+		t.Fatalf("got %+v", got)
+	}
+	if got, err := parseOnline([]byte("{}")); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %+v %v", got, err)
+	}
+}

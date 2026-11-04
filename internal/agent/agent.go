@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 )
 
@@ -46,6 +47,31 @@ func (a *Agent) Traffic(ctx context.Context) ([]TrafficDelta, error) {
 		all = append(all, d...)
 	}
 	return all, errors.Join(errs...)
+}
+
+// Online merges who is connected across all cores, by user email tag.
+func (a *Agent) Online(ctx context.Context) (map[string]OnlineEntry, error) {
+	out := map[string]OnlineEntry{}
+	var errs []error
+	for _, ad := range a.adapters {
+		list, err := ad.Online(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", ad.Name(), err))
+			continue
+		}
+		for _, e := range list {
+			cur := out[e.Email]
+			cur.Email = e.Email
+			cur.Connections += e.Connections
+			for _, ip := range e.IPs {
+				if !slices.Contains(cur.IPs, ip) {
+					cur.IPs = append(cur.IPs, ip)
+				}
+			}
+			out[e.Email] = cur
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 func (a *Agent) Stop() {

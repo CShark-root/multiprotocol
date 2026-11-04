@@ -72,6 +72,9 @@ export type UserInput = {
   expireAt: string | null
 }
 
+export type OnlineEntry = { userId: number; ips: string[]; connections: number }
+export type DayTraffic = { day: string; bytes: number }
+
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
 export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
@@ -284,12 +287,17 @@ export const api = {
     request<{ admin: Admin }>('POST', 'auth/login', code ? { username, password, code } : { username, password }),
   logout: () => request<void>('POST', 'auth/logout'),
   system: () => request<SystemInfo>('GET', 'system'),
+  online: () => request<OnlineEntry[]>('GET', 'online'),
+  trafficByDay: (days = 30) => request<DayTraffic[]>('GET', `stats/traffic?days=${days}`),
   users: {
     list: () => request<User[]>('GET', 'users'),
     create: (input: UserInput) => request<User>('POST', 'users', input),
     update: (id: number, input: UserInput) => request<User>('PUT', `users/${id}`, input),
     remove: (id: number) => request<void>('DELETE', `users/${id}`),
     links: (id: number) => request<UserLinks>('GET', `users/${id}/links`),
+    traffic: (id: number, days = 30) => request<DayTraffic[]>('GET', `users/${id}/traffic?days=${days}`),
+    extend: (id: number, days: number) => request<User>('POST', `users/${id}/extend`, { days }),
+    resetTraffic: (id: number) => request<User>('POST', `users/${id}/reset-traffic`, {}),
   },
   inbounds: {
     list: () => request<Inbound[]>('GET', 'inbounds'),

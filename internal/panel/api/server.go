@@ -47,13 +47,14 @@ type server struct {
 	Deps
 	prefix       string // "/<basePath>"
 	loginLimiter *rateLimiter
+	onlineCache  *onlineCache
 }
 
 func New(d Deps) http.Handler {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	s := &server{Deps: d, prefix: "/" + d.BasePath, loginLimiter: newRateLimiter(10, time.Minute)}
+	s := &server{Deps: d, prefix: "/" + d.BasePath, loginLimiter: newRateLimiter(10, time.Minute), onlineCache: &onlineCache{}}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -84,7 +85,12 @@ func New(d Deps) http.Handler {
 					r.Put("/{id}", s.updateUser)
 					r.Delete("/{id}", s.deleteUser)
 					r.Get("/{id}/links", s.userLinks)
+					r.Get("/{id}/traffic", s.userTraffic)
+					r.Post("/{id}/extend", s.extendUser)
+					r.Post("/{id}/reset-traffic", s.resetUserTraffic)
 				})
+				r.Get("/online", s.online)
+				r.Get("/stats/traffic", s.trafficStats)
 				r.Get("/account", s.account)
 				r.Post("/account/password", s.changePassword)
 				r.Post("/account/totp/setup", s.totpSetup)

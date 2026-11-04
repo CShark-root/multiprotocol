@@ -12,6 +12,8 @@ type Adapter interface {
 	Apply(ctx context.Context, config []byte) error
 	// Traffic returns per-user byte counts since the previous call.
 	Traffic(ctx context.Context) ([]TrafficDelta, error)
+	// Online lists users connected right now.
+	Online(ctx context.Context) ([]OnlineEntry, error)
 	Health(ctx context.Context) HealthStatus
 	Stop()
 }
@@ -20,6 +22,14 @@ type TrafficDelta struct {
 	Email string `json:"email"`
 	Up    int64  `json:"up"`
 	Down  int64  `json:"down"`
+}
+
+// OnlineEntry is one connected user as a core sees them. IPs may be empty
+// when the core does not report them (Hysteria reports only a count).
+type OnlineEntry struct {
+	Email       string   `json:"email"`
+	IPs         []string `json:"ips"`
+	Connections int      `json:"connections"`
 }
 
 type HealthStatus struct {
