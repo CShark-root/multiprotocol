@@ -10,6 +10,7 @@ type Admin struct {
 	ID           int64
 	Username     string
 	PasswordHash string
+	TOTPSecret   string // "" = two-factor authentication off
 	CreatedAt    time.Time
 }
 
@@ -43,20 +44,32 @@ func (s *Store) CreateFirstAdmin(ctx context.Context, username, passwordHash str
 	return Admin{ID: id, Username: username, PasswordHash: passwordHash, CreatedAt: fromUnix(now.Unix())}, nil
 }
 
+const adminColumns = `id, username, password_hash, COALESCE(totp_secret, ''), created_at`
+
 func (s *Store) AdminByUsername(ctx context.Context, username string) (Admin, error) {
-	return scanAdmin(s.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM admins WHERE username = ?`, username))
+	return scanAdmin(s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE username = ?`, username))
 }
 
 func (s *Store) AdminByID(ctx context.Context, id int64) (Admin, error) {
-	return scanAdmin(s.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM admins WHERE id = ?`, id))
+	return scanAdmin(s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = ?`, id))
+}
+
+func (s *Store) SetAdminPassword(ctx context.Context, id int64, passwordHash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE admins SET password_hash = ? WHERE id = ?`, passwordHash, id)
+	return err
+}
+
+// SetAdminTOTP stores the secret; "" turns two-factor authentication off.
+func (s *Store) SetAdminTOTP(ctx context.Context, id int64, secret string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE admins SET totp_secret = ? WHERE id = ?`,
+		sql.NullString{String: secret, Valid: secret != ""}, id)
+	return err
 }
 
 func scanAdmin(row *sql.Row) (Admin, error) {
 	var a Admin
 	var created int64
-	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash, &created); err != nil {
+	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.TOTPSecret, &created); err != nil {
 		return Admin{}, notFound(err)
 	}
 	a.CreatedAt = fromUnix(created)

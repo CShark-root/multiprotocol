@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { Hammer } from 'lucide-react'
 import { Card, EmptyState, PageHeader } from '@/components/ui'
 
-export type SoonSection = 'nodes' | 'routing' | 'amnezia' | 'settings'
+export type SoonSection = 'nodes' | 'routing' | 'amnezia'
 
 export function ComingSoonPage({ section }: { section: SoonSection }) {
   const { t } = useTranslation()

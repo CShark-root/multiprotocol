@@ -16,6 +16,7 @@ const sessionCookie = "sid"
 type credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Code     string `json:"code,omitempty"` // TOTP, when two-factor authentication is on
 }
 
 type adminDTO struct {
@@ -72,12 +73,21 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	token, admin, err := s.Auth.Login(r.Context(), in.Username, in.Password, clientIP(r), r.UserAgent())
-	if errors.Is(err, auth.ErrInvalidCredentials) {
-		s.Logger.Warn("failed login", "ip", clientIP(r))
-		s.Events.Add(r.Context(), service.EventLoginFailed, "warning", 0, "",
+	token, admin, err := s.Auth.Login(r.Context(), in.Username, in.Password, in.Code, clientIP(r), r.UserAgent())
+	switch {
+	case errors.Is(err, auth.ErrTOTPRequired):
+		// The password was right; the UI now asks for the code.
+		writeError(w, http.StatusUnauthorized, "totp_required", err.Error())
+		return
+	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrInvalidTOTP):
+		code := "invalid_credentials"
+		if errors.Is(err, auth.ErrInvalidTOTP) {
+			code = "invalid_totp"
+		}
+		s.Logger.Warn("failed login", "ip", clientIP(r), "reason", code)
+		s.Events.Add(r.Context(), service.EventLoginFailed, "warning", 0, code,
 			map[string]any{"ip": clientIP(r), "username": truncate(in.Username, 64)})
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
+		writeError(w, http.StatusUnauthorized, code, "invalid username, password or code")
 		return
 	}
 	if err != nil {

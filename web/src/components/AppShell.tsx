@@ -34,7 +34,7 @@ const nav: NavItem[] = [
   { to: '/routing', key: 'routing', icon: RouteIcon, soon: true },
   { to: '/logs', key: 'logs', icon: Activity },
   { to: '/amnezia', key: 'amnezia', icon: Shield, soon: true },
-  { to: '/settings', key: 'settings', icon: Settings, soon: true },
+  { to: '/settings', key: 'settings', icon: Settings },
 ]
 
 const nextTheme: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' }

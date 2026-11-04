@@ -255,15 +255,33 @@ const query = (params: Record<string, string | number | undefined>) => {
 /** Live log stream URL (Server-Sent Events, same-origin cookie auth). */
 export const logStreamUrl = (f: LogFilter) => basePath + 'api/logs/stream' + query({ source: f.source, level: f.level, q: f.q })
 
+export type SessionInfo = { id: string; createdAt: string; expiresAt: string; ip: string; userAgent: string; current: boolean }
+export type PanelSettings = { port: number; basePath: string; subPath: string; publicHost: string; decoy: '404' | 'drop' }
+
 export const api = {
+  account: {
+    get: () => request<{ username: string; totpEnabled: boolean }>('GET', 'account'),
+    changePassword: (current: string, next: string) => request<void>('POST', 'account/password', { current, next }),
+    totpSetup: () => request<{ secret: string; uri: string }>('POST', 'account/totp/setup', {}),
+    totpEnable: (secret: string, code: string) => request<void>('POST', 'account/totp/enable', { secret, code }),
+    totpDisable: (password: string, code: string) => request<void>('POST', 'account/totp/disable', { password, code }),
+    sessions: () => request<SessionInfo[]>('GET', 'account/sessions'),
+    revokeSession: (id: string) => request<void>('DELETE', `account/sessions/${id}`),
+    revokeOthers: () => request<{ revoked: number }>('POST', 'account/sessions/revoke-others', {}),
+  },
+  settings: {
+    panel: () => request<{ settings: PanelSettings; pending: boolean; restartSupported: boolean }>('GET', 'settings/panel'),
+    savePanel: (s: PanelSettings & { password: string }) => request<{ pending: boolean; url: string }>('PUT', 'settings/panel', s),
+    restart: () => request<{ restarting: boolean }>('POST', 'settings/restart', {}),
+  },
   logs: (f: LogFilter) => request<LogEntry[]>('GET', 'logs' + query({ ...f, limit: 300 })),
   events: (before?: number) => request<PanelEvent[]>('GET', 'events' + query({ before, limit: 100 })),
   audit: (before?: number) => request<AuditRecord[]>('GET', 'audit' + query({ before, limit: 100 })),
   authState: () => request<AuthState>('GET', 'auth/state'),
   setup: (username: string, password: string) =>
     request<{ admin: Admin }>('POST', 'auth/setup', { username, password }),
-  login: (username: string, password: string) =>
-    request<{ admin: Admin }>('POST', 'auth/login', { username, password }),
+  login: (username: string, password: string, code?: string) =>
+    request<{ admin: Admin }>('POST', 'auth/login', code ? { username, password, code } : { username, password }),
   logout: () => request<void>('POST', 'auth/logout'),
   system: () => request<SystemInfo>('GET', 'system'),
   users: {

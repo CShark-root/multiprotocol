@@ -88,6 +88,8 @@ export function LoginPage() {
   const signedIn = useSignedIn()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [needCode, setNeedCode] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -96,10 +98,12 @@ export function LoginPage() {
     setBusy(true)
     setError('')
     try {
-      const { admin } = await api.login(username, password)
+      const { admin } = await api.login(username, password, needCode ? code : undefined)
       signedIn(admin)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) setError(t('auth.rateLimited'))
+      if (err instanceof ApiError && err.code === 'totp_required') setNeedCode(true)
+      else if (err instanceof ApiError && err.code === 'invalid_totp') setError(t('auth.invalidCode'))
+      else if (err instanceof ApiError && err.status === 429) setError(t('auth.rateLimited'))
       else if (err instanceof ApiError && err.status === 401) setError(t('auth.invalid'))
       else setError(t('common.error'))
     } finally {
@@ -116,6 +120,22 @@ export function LoginPage() {
         <Field label={t('auth.password')}>
           {(id) => <Input id={id} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />}
         </Field>
+        {needCode && (
+          <Field label={t('auth.code')} hint={t('auth.codeHint')}>
+            {(id) => (
+              <Input
+                id={id}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                className="text-center font-mono text-lg tracking-[0.4em]"
+                required
+              />
+            )}
+          </Field>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button type="submit" className="w-full" disabled={busy}>
           {t('auth.signIn')}

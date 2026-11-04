@@ -33,6 +33,7 @@ type Deps struct {
 	Journal    *journal.Hub
 	Store      *store.Store // read-only views: logs, events, audit
 	Scanner    *service.Scanner
+	Panel      PanelConfig
 	Agent      *agent.Agent // nil when the panel runs without a local agent
 	Web        fs.FS        // built frontend (web/dist)
 	Logger     *slog.Logger
@@ -84,6 +85,17 @@ func New(d Deps) http.Handler {
 					r.Delete("/{id}", s.deleteUser)
 					r.Get("/{id}/links", s.userLinks)
 				})
+				r.Get("/account", s.account)
+				r.Post("/account/password", s.changePassword)
+				r.Post("/account/totp/setup", s.totpSetup)
+				r.Post("/account/totp/enable", s.totpEnable)
+				r.Post("/account/totp/disable", s.totpDisable)
+				r.Get("/account/sessions", s.listSessions)
+				r.Delete("/account/sessions/{id}", s.revokeSession)
+				r.Post("/account/sessions/revoke-others", s.revokeOtherSessions)
+				r.Get("/settings/panel", s.panelSettings)
+				r.Put("/settings/panel", s.savePanelSettings)
+				r.Post("/settings/restart", s.restartPanel)
 				r.Get("/logs", s.listLogs)
 				r.Get("/logs/stream", s.streamLogs)
 				r.Get("/events", s.listEvents)

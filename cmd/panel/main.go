@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -77,12 +78,25 @@ func serve(args []string) int {
 		log.Error("load config", "err", err)
 		return 1
 	}
+	stored := cfg // as on disk, to tell the settings page what is not applied yet
 	if *dev {
 		cfg.Listen, cfg.BasePath = "127.0.0.1:8080", "dev"
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The settings page restarts the panel to apply a new address: exit with
+	// exitRestart and let systemd (Restart=on-failure) start it again.
+	var restart func()
+	var restarting atomic.Bool
+	if !*dev {
+		restart = func() {
+			log.Warn("restarting to apply new panel settings")
+			restarting.Store(true)
+			stop()
+		}
+	}
 
 	st, err := store.Open(ctx, filepath.Join(*dataDir, "panel.db"))
 	if err != nil {
@@ -141,6 +155,7 @@ func serve(args []string) int {
 		Journal:    hub,
 		Store:      st,
 		Scanner:    service.NewScanner(),
+		Panel:      api.PanelConfig{DataDir: *dataDir, Current: stored, Restart: restart},
 		Agent:      localAgent,
 		Web:        web.Files(),
 		Logger:     log,
@@ -229,8 +244,15 @@ func serve(args []string) int {
 		log.Error("serve", "err", err)
 		return 1
 	}
+	if restarting.Load() {
+		return exitRestart
+	}
 	return 0
 }
+
+// exitRestart is a non-zero exit code so systemd's Restart=on-failure brings
+// the panel back with the new settings.
+const exitRestart = 75
 
 // defaultXrayBin is where scripts/install-xray.sh puts the core on Linux.
 func defaultXrayBin() string {

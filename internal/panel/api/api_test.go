@@ -3,8 +3,13 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +19,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"panel/internal/agent"
 	"panel/internal/panel/api"
@@ -44,8 +50,14 @@ func newClient(t *testing.T) *client {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
+	dataDir := t.TempDir()
+	panelCfg, _, err := config.LoadOrCreate(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	h := api.New(api.Deps{
+		Panel:    api.PanelConfig{DataDir: dataDir, Current: panelCfg},
 		BasePath: base,
 		Auth:     auth.NewService(st),
 		Users:    service.NewUsers(st, nil),
@@ -364,6 +376,80 @@ func TestJournalEndpoints(t *testing.T) {
 	if code, _ := c.json("GET", "/api/logs?level=warn&q=x", nil); code != 200 {
 		t.Fatalf("logs: %d", code)
 	}
+}
+
+// totpNow computes the current RFC 6238 code for a base32 secret, offset by
+// steps (the server accepts one step either way, each step only once).
+func totpNow(secret string, steps int64) string {
+	key, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], uint64(time.Now().Unix()/30+steps))
+	mac := hmac.New(sha1.New, key)
+	mac.Write(msg[:])
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(sum[off:off+4])&0x7fffffff)%1_000_000)
+}
+
+func TestAccountSecurity(t *testing.T) {
+	c := newClient(t)
+	creds := map[string]string{"username": "admin", "password": "a-long-enough-password"}
+	c.expect(200, "POST", "/api/auth/setup", creds)
+
+	// A second browser session, to see it signed out by a password change.
+	other := &client{t: t, url: c.url, server: c.server, http: &http.Client{Jar: mustJar()}}
+	other.expect(200, "POST", "/api/auth/login", creds)
+	if code, body := c.json("GET", "/api/account/sessions", nil); code != 200 || strings.Count(string(body), `"id"`) != 2 {
+		t.Fatalf("sessions: %d %s", code, body)
+	}
+
+	c.expect(403, "POST", "/api/account/password", map[string]string{"current": "nope", "next": "another-long-password"})
+	c.expect(204, "POST", "/api/account/password", map[string]string{"current": creds["password"], "next": "another-long-password"})
+	other.expect(401, "GET", "/api/users", nil) // signed out everywhere else
+	c.expect(200, "GET", "/api/users", nil)     // but not here
+	creds["password"] = "another-long-password"
+
+	// Two-factor authentication.
+	setup := c.expect(200, "POST", "/api/account/totp/setup", map[string]any{})
+	secret := setup["secret"].(string)
+	c.expect(403, "POST", "/api/account/totp/enable", map[string]string{"secret": secret, "code": "000000"})
+	enableCode := totpNow(secret, 0)
+	c.expect(204, "POST", "/api/account/totp/enable", map[string]string{"secret": secret, "code": enableCode})
+	if a := c.expect(200, "GET", "/api/account", nil); a["totpEnabled"] != true {
+		t.Fatalf("account: %v", a)
+	}
+	c.expect(204, "POST", "/api/auth/logout", nil)
+	if e := c.expect(401, "POST", "/api/auth/login", creds); e["error"].(map[string]any)["code"] != "totp_required" {
+		t.Fatalf("login without code: %v", e)
+	}
+	withCode := map[string]string{"username": "admin", "password": creds["password"], "code": enableCode}
+	c.expect(401, "POST", "/api/auth/login", withCode) // already used to enable: no replay
+	withCode["code"] = totpNow(secret, 1)
+	c.expect(200, "POST", "/api/auth/login", withCode)
+	c.expect(403, "POST", "/api/account/totp/disable", map[string]string{"password": creds["password"], "code": "123456"})
+
+	// Panel address settings need the password and validate everything.
+	ps := c.expect(200, "GET", "/api/settings/panel", nil)
+	s := ps["settings"].(map[string]any)
+	if ps["pending"] != false || ps["restartSupported"] != false {
+		t.Fatalf("panel settings: %v", ps)
+	}
+	s["password"] = "wrong"
+	c.expect(403, "PUT", "/api/settings/panel", s)
+	s["password"], s["publicHost"] = creds["password"], "vpn.example.com"
+	s["subPath"] = s["basePath"]
+	c.expect(400, "PUT", "/api/settings/panel", s) // the two secret paths must differ
+	s["subPath"] = "AnotherSecretPath99"
+	saved := c.expect(200, "PUT", "/api/settings/panel", s)
+	if saved["pending"] != true {
+		t.Fatalf("a saved change must be pending until restart: %v", saved)
+	}
+	c.expect(409, "POST", "/api/settings/restart", map[string]any{})
+}
+
+func mustJar() http.CookieJar {
+	j, _ := cookiejar.New(nil)
+	return j
 }
 
 func TestWritesRequireJSON(t *testing.T) {
