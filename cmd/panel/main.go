@@ -34,6 +34,7 @@ import (
 	"panel/internal/agent/singbox"
 	"panel/internal/agent/xray"
 	"panel/internal/amnezia"
+	"panel/internal/nethelper"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/backup"
@@ -65,6 +66,8 @@ func main() {
 			os.Exit(backupCmd(os.Args[2:]))
 		case "restore":
 			os.Exit(restoreCmd(os.Args[2:]))
+		case "net-helper":
+			os.Exit(netHelper(os.Args[2:]))
 		case "amnezia-helper":
 			os.Exit(amneziaHelper(os.Args[2:]))
 		}
@@ -162,6 +165,9 @@ func serve(args []string) int {
 		changed = syncer.Trigger
 		routingSvc = service.NewRouting(st, events, geoDir, changed, localAgent.RestartCores, log)
 		syncer.SetRouting(routingSvc)
+		if !*dev && runtime.GOOS == "linux" {
+			syncer.SetHops(nethelper.NewClient(nethelper.Socket))
+		}
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)
 	} else {
@@ -596,4 +602,25 @@ func freeLoopback() (string, error) {
 	}
 	defer l.Close()
 	return l.Addr().String(), nil
+}
+
+// netHelper runs the port hopping helper (as root, from panel-net.service):
+// it owns the nftables table "inet panel_hop" and nothing else.
+func netHelper(args []string) int {
+	fsFlags := flag.NewFlagSet("net-helper", flag.ExitOnError)
+	socket := fsFlags.String("socket", nethelper.Socket, "unix socket to listen on")
+	group := fsFlags.String("group", "panel", "group allowed to connect")
+	fsFlags.Parse(args)
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	gid := -1
+	if g, err := user.LookupGroup(*group); err == nil {
+		gid, _ = strconv.Atoi(g.Gid)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := nethelper.Serve(ctx, *socket, gid, log); err != nil {
+		log.Error("net helper", "err", err)
+		return 1
+	}
+	return 0
 }

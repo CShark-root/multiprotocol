@@ -11,20 +11,34 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
+      <div className="space-y-8">
+        <Group title={t('settings.groupAccess')}>
           <AddressCard />
           <DomainCard />
-          <BackupCard />
-          <UpdateCard />
-        </div>
-        <div className="space-y-4">
+        </Group>
+        <Group title={t('settings.groupSecurity')}>
           <TotpCard />
-          <PasswordCard />
-          <SessionsCard />
-        </div>
+          <div className="space-y-4">
+            <PasswordCard />
+            <SessionsCard />
+          </div>
+        </Group>
+        <Group title={t('settings.groupMaintenance')}>
+          <UpdateCard />
+          <BackupCard />
+        </Group>
       </div>
     </>
+  )
+}
+
+// A titled row of cards: two side by side on wide screens, aligned at the top.
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h2>
+      <div className="grid items-start gap-4 lg:grid-cols-2">{children}</div>
+    </section>
   )
 }
 
@@ -571,82 +585,118 @@ function BackupCard() {
 
 function UpdateCard() {
   const { t, i18n } = useTranslation()
-  const [started, setStarted] = useState<string | null>(null) // version when the update began
-  const [cores, setCores] = useState(false)
+  const lng = i18n.language
+  const [started, setStarted] = useState<string | null>(null) // version when an update began
   const q = useQuery({
     queryKey: ['update'],
     queryFn: () => api.update.status(false),
-    // While updating the panel restarts: keep asking until it is back.
-    refetchInterval: started ? 3000 : false,
-    retry: started ? true : 1,
+    // The panel restarts during an update: keep asking until it answers.
+    refetchInterval: started !== null ? 3000 : false,
+    retry: started !== null ? true : 1,
   })
-  const check = useMutation({ mutationFn: () => api.update.status(true), onSuccess: (d) => q.refetch().then(() => d) })
+  const system = useQuery({ queryKey: ['system'], queryFn: api.system })
+  const qc = useQueryClient()
+  const check = useMutation({
+    mutationFn: () => api.update.status(true),
+    onSuccess: (d) => qc.setQueryData(['update'], d),
+  })
   const start = useMutation({
-    mutationFn: () => api.update.start(cores),
+    mutationFn: (cores: boolean) => api.update.start(cores),
     onSuccess: () => setStarted(q.data?.current ?? ''),
   })
-  const d = check.data ?? q.data
-  const log = q.data?.log ?? []
-  const finished = log.length > 0 && /== .*(done|failed)$/.test(log[log.length - 1])
+
+  const d = q.data
+  const log = d?.log ?? []
+  const last = log.length ? log[log.length - 1] : ''
+  const finished = /== .*(done|failed)$/.test(last)
   useEffect(() => {
-    // A new version answered: reload so the page matches the new panel.
-    if (started !== null && q.data && !q.data.pending && (q.data.current !== started || finished)) {
-      if (q.data.current !== started) window.location.reload()
-      else setStarted(null)
-    }
-  }, [q.data, started, finished])
+    if (started === null || !d || d.pending) return
+    if (d.current !== started) window.location.reload() // the new version answered
+    else if (finished) setStarted(null) // same version (reinstall, cores only, or a failure)
+  }, [d, started, finished])
 
   if (!d) return null
   const latest = d.latest?.tag
-  const newer = latest && latest !== d.current
+  const newer = Boolean(latest && latest !== d.current)
+  const busy = started !== null
+  // "== 2026-11-05T10:00:00+03:00 update started (cores: 0)" … "== … done"
+  const lastAt = /^== (\S+)/.exec(log[0] ?? '')?.[1]
+  const lastOk = last.endsWith('done')
+  const cores = system.data?.localAgent?.cores ?? []
+
   return (
-    <Section icon={<Download className="h-5 w-5" />} title={t('update.title')} hint={t('update.hint')}>
-      <div className="space-y-3 text-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground">{t('update.current')}</span>
-          <span className="font-mono">{d.current}</span>
-          {latest && (
-            <>
-              <span className="text-muted-foreground">· {t('update.latest')}</span>
-              <a href={d.latest!.url} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-2">
-                {latest}
-              </a>
-              {newer ? <Badge tone="accent">{t('update.available')}</Badge> : <Badge tone="success">{t('update.upToDate')}</Badge>}
-            </>
-          )}
+    <Section icon={<Download className="h-5 w-5" />} title={t('update.title')}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/60 p-3.5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-base font-semibold">{d.current}</span>
+              {newer ? (
+                <Badge tone="accent">{t('update.available', { version: latest })}</Badge>
+              ) : latest ? (
+                <Badge tone="success">{t('update.upToDate')}</Badge>
+              ) : null}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {d.error ? t('update.checkFailed', { error: d.error }) : t('update.source', { repo: d.repo })}
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" disabled={check.isPending || busy} onClick={() => check.mutate()}>
+            <RefreshCw className={'h-4 w-4 ' + (check.isPending ? 'animate-spin' : '')} />
+            {t('update.check')}
+          </Button>
         </div>
-        {d.error && <p className="text-xs text-muted-foreground">{t('update.checkFailed', { error: d.error })}</p>}
-        {started !== null ? (
-          <div className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-accent-foreground">
+
+        {busy ? (
+          <div className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-sm text-accent-foreground">
             <RefreshCw className="h-4 w-4 animate-spin" />
             {t('update.running')}
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button size="sm" disabled={!d.supported || start.isPending} onClick={() => start.mutate()}>
-              <Download className="h-4 w-4" />
-              {newer ? t('update.updateTo', { version: latest }) : t('update.reinstall')}
-            </Button>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={cores} onChange={(e) => setCores(e.target.checked)} />
-              {t('update.withCores')}
-            </label>
-            <Button size="sm" variant="ghost" disabled={check.isPending} onClick={() => check.mutate()}>
-              {t('update.check')}
-            </Button>
-          </div>
+          newer && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={!d.supported || start.isPending} onClick={() => start.mutate(false)}>
+                <Download className="h-4 w-4" />
+                {t('update.updateTo', { version: latest })}
+              </Button>
+              <a href={d.latest!.url} target="_blank" rel="noreferrer" className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                {t('update.whatsNew')}
+              </a>
+            </div>
+          )
         )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          <div className="text-sm">
+            <div className="font-medium">{t('update.cores')}</div>
+            <div className="text-xs text-muted-foreground">
+              {cores.length ? cores.map((c) => `${c.name} ${c.version || '—'}`).join(' · ') : '—'}
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" disabled={!d.supported || busy || start.isPending} onClick={() => start.mutate(true)}>
+            {t('update.updateCores')}
+          </Button>
+        </div>
+
         {!d.supported && <p className="text-xs text-muted-foreground">{t('update.unsupported')}</p>}
         {start.isError && <p className="text-xs text-destructive">{t('common.error')}</p>}
-        {log.length > 0 && (
-          <details>
-            <summary className="cursor-pointer text-xs text-muted-foreground">
-              {t('update.log')} {finished && log[log.length - 1].endsWith('failed') && <span className="text-destructive">· {t('update.failed')}</span>}
-            </summary>
-            <pre className="mt-2 max-h-48 overflow-auto rounded-xl bg-muted p-3 text-[11px]">{log.join('\n')}</pre>
-          </details>
-        )}
-        <p className="text-xs text-muted-foreground">{t('update.howItWorks', { lng: i18n.language })}</p>
+
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">
+            {lastAt
+              ? t('update.lastRun', {
+                  time: new Date(lastAt).toLocaleString(lng, { dateStyle: 'medium', timeStyle: 'short' }),
+                  result: finished ? (lastOk ? t('update.ok') : t('update.failed')) : t('update.inProgress'),
+                })
+              : t('update.noRuns')}
+          </summary>
+          <div className="mt-2 space-y-2">
+            {log.length > 0 && <pre className="max-h-48 overflow-auto rounded-xl bg-muted p-3 text-[11px] text-foreground">{log.join('\n')}</pre>}
+            <Button variant="ghost" size="sm" disabled={!d.supported || busy} onClick={() => start.mutate(false)}>
+              {t('update.reinstall')}
+            </Button>
+          </div>
+        </details>
       </div>
     </Section>
   )

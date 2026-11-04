@@ -224,6 +224,8 @@ export type Inbound = {
   masquerade?: string
   upMbps?: number
   downMbps?: number
+  hopPorts?: string
+  hopInterval?: number
   certPin?: string
   expert: ExpertInput
   createdAt: string
@@ -246,6 +248,8 @@ export type InboundInput = {
   masquerade: string
   upMbps: number
   downMbps: number
+  hopPorts: string
+  hopInterval: number
   enabled: boolean
   expert: ExpertInput
 }
@@ -286,6 +290,15 @@ export type SystemInfo = {
       netIface: string
       netRxBps: number
       netTxBps: number
+      osName: string
+      kernel: string
+      swapTotal: number
+      swapFree: number
+      diskTotal: number
+      diskFree: number
+      congestion: string
+      qdisc: string
+      processes: number
     }
     cores: CoreHealth[]
   } | null

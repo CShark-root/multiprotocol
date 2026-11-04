@@ -1,0 +1,39 @@
+[Unit]
+Description=panel - UDP port hopping for Hysteria2 (own nftables table only)
+After=network.target
+
+[Service]
+# Writing nftables needs root. This helper only replaces the table
+# "inet panel_hop" (UDP port ranges redirected to Hysteria2 inbounds) on the
+# panel's request over /run/panel-net/helper.sock (group panel). Docker's,
+# Amnezia's and all other rules are never read or changed.
+ExecStart=/usr/local/bin/panel net-helper
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=panel-net
+RuntimeDirectoryMode=0750
+Group=panel
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_CHOWN
+AmbientCapabilities=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+LockPersonality=true
+SystemCallArchitectures=native
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

@@ -39,11 +39,13 @@ type inboundDTO struct {
 	WSPath          string `json:"wsPath,omitempty"`
 
 	// Hysteria2 (CertPin also for TUIC and AnyTLS)
-	Obfs       bool   `json:"obfs"`
-	Masquerade string `json:"masquerade,omitempty"`
-	UpMbps     int    `json:"upMbps,omitempty"`
-	DownMbps   int    `json:"downMbps,omitempty"`
-	CertPin    string `json:"certPin,omitempty"`
+	Obfs        bool   `json:"obfs"`
+	Masquerade  string `json:"masquerade,omitempty"`
+	UpMbps      int    `json:"upMbps,omitempty"`
+	DownMbps    int    `json:"downMbps,omitempty"`
+	HopPorts    string `json:"hopPorts,omitempty"`
+	HopInterval int    `json:"hopInterval,omitempty"`
+	CertPin     string `json:"certPin,omitempty"`
 
 	Expert service.ExpertInput `json:"expert"`
 }
@@ -65,6 +67,8 @@ type inboundInputDTO struct {
 	Masquerade      string `json:"masquerade"`
 	UpMbps          int    `json:"upMbps"`
 	DownMbps        int    `json:"downMbps"`
+	HopPorts        string `json:"hopPorts"`
+	HopInterval     int    `json:"hopInterval"`
 	Enabled         *bool  `json:"enabled"` // omitted = true
 
 	Expert service.ExpertInput `json:"expert"`
@@ -95,6 +99,7 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	if h := ib.Settings.Hysteria; h != nil {
 		d.ServerName, d.Masquerade, d.UpMbps, d.DownMbps = h.SNI, h.Masquerade, h.UpMbps, h.DownMbps
 		d.Obfs, d.CertPin = h.ObfsPassword != "", h.PinSHA256
+		d.HopPorts, d.HopInterval = h.HopPorts, h.HopInterval
 	}
 	if t := ib.Settings.TLS; t != nil {
 		d.ServerName, d.CertPin = t.SNI, t.PinSHA256
@@ -126,6 +131,7 @@ func (in inboundInputDTO) toInput() service.InboundInput {
 		Transport: in.Transport, Target: in.Target, ServerName: in.ServerName, Fingerprint: in.Fingerprint,
 		XHTTPPath: in.XHTTPPath, XHTTPMode: in.XHTTPMode, GRPCServiceName: in.GRPCServiceName, WSPath: in.WSPath,
 		Obfs: in.Obfs, Masquerade: in.Masquerade, UpMbps: in.UpMbps, DownMbps: in.DownMbps,
+		HopPorts: in.HopPorts, HopInterval: in.HopInterval,
 		Expert: in.Expert,
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
+	"strings"
 
 	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
@@ -130,6 +131,10 @@ func singboxOutbounds(ib store.Inbound, u store.User, host string) []map[string]
 		o["tls"] = insecureTLS(s.Hysteria.SNI, nil, s.Hysteria.DomainCert)
 		if s.Hysteria.ObfsPassword != "" {
 			o["obfs"] = map[string]any{"type": "salamander", "password": s.Hysteria.ObfsPassword}
+		}
+		if s.Hysteria.HopPorts != "" {
+			o["server_ports"] = []string{strings.Replace(s.Hysteria.HopPorts, "-", ":", 1)}
+			o["hop_interval"] = strconv.Itoa(s.Hysteria.HopInterval) + "s"
 		}
 	case "tuic":
 		o["type"], o["uuid"], o["password"] = "tuic", u.UUID, u.UUID

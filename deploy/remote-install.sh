@@ -26,6 +26,10 @@ esac
 install -m 0755 "$SRC/panel-linux-$ARCH" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 install -m 0644 "$SRC/panel-amnezia.service" /etc/systemd/system/panel-amnezia.service
+install -m 0644 "$SRC/panel-net.service" /etc/systemd/system/panel-net.service
+# Port hopping uses nftables (the kernel has it; this adds the nft tool).
+# nftables.service stays disabled: it would load /etc/nftables.conf at boot.
+command -v nft >/dev/null || apt-get install -y -qq nftables
 # Updates from the panel's own "Update" button: the panel only drops a request
 # file, systemd runs the checksum-verified installer as root.
 install -d -m 0755 /usr/local/lib/panel
@@ -79,7 +83,8 @@ RULES
 fi
 
 systemctl daemon-reload
-systemctl enable panel panel-amnezia panel-update.path >/dev/null 2>&1
+systemctl enable panel panel-amnezia panel-net panel-update.path >/dev/null 2>&1
+systemctl restart panel-net
 systemctl start panel-update.path
 # The Amnezia tab helper only reads Docker; Docker itself is left alone.
 systemctl restart panel-amnezia

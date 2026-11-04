@@ -113,10 +113,12 @@ type InboundInput struct {
 	WSPath          string
 
 	// Hysteria2
-	Obfs       bool
-	Masquerade string
-	UpMbps     int
-	DownMbps   int
+	Obfs        bool
+	Masquerade  string
+	UpMbps      int
+	DownMbps    int
+	HopPorts    string // "20000-30000" or empty
+	HopInterval int    // seconds, 0 = 30
 
 	// Fine-tuning of Xray inbounds; zero value = defaults.
 	Expert ExpertInput
@@ -361,8 +363,21 @@ func normalizeHysteria(f *store.InboundFields, in InboundInput) error {
 			return validate.Fail(field, "0 (no limit) to 100000 Mbps")
 		}
 	}
+	hop, err := normalizeHop(in.HopPorts, f.Port)
+	if err != nil {
+		return err
+	}
+	interval := in.HopInterval
+	if hop == "" {
+		interval = 0
+	} else if interval == 0 {
+		interval = 30
+	} else if interval < 5 || interval > 600 {
+		return validate.Fail("hopInterval", "5-600 seconds")
+	}
 	f.Settings.Hysteria = &store.HysteriaSettings{
 		SNI: sni, Masquerade: u.String(), UpMbps: in.UpMbps, DownMbps: in.DownMbps,
+		HopPorts: hop, HopInterval: interval,
 	}
 	return nil
 }
@@ -757,4 +772,24 @@ func (s *Inbounds) RefreshDomainCerts(ctx context.Context) error {
 		s.changed()
 	}
 	return nil
+}
+
+// normalizeHop checks a port hopping range "20000-30000". The range must
+// stay below the kernel's outgoing ports (32768+) and clear of the inbound's
+// own port; the helper checks it against listening services too.
+func normalizeHop(v string, port int) (string, error) {
+	v = strings.ReplaceAll(strings.TrimSpace(v), " ", "")
+	if v == "" {
+		return "", nil
+	}
+	lo, hi, ok := strings.Cut(v, "-")
+	a, err1 := strconv.Atoi(lo)
+	b, err2 := strconv.Atoi(hi)
+	if !ok || err1 != nil || err2 != nil || a < 1024 || b > 32767 || a >= b || b-a < 10 {
+		return "", validate.Fail("hopPorts", "a range like 20000-30000, within 1024-32767")
+	}
+	if port >= a && port <= b {
+		return "", validate.Fail("hopPorts", "the range must not include the inbound's own port")
+	}
+	return strconv.Itoa(a) + "-" + strconv.Itoa(b), nil
 }

@@ -8,3 +8,5 @@ import "runtime"
 func readSystemInfo() SystemInfo {
 	return SystemInfo{CPUs: runtime.NumCPU()}
 }
+
+func readExtra(*SystemInfo) {}

@@ -21,6 +21,7 @@ $files = @(
     "scripts\install-singbox.sh",
     "deploy\panel.service",
     "deploy\panel-amnezia.service",
+    "deploy\panel-net.service",
     "deploy\panel-update.service",
     "deploy\panel-update.path",
     "deploy\panel-update.sh",

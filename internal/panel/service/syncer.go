@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/nethelper"
 	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
 )
@@ -21,6 +25,8 @@ type Syncer struct {
 	events  *Events
 	apiAddr string
 	routing *Routing // nil: defaults (tests)
+	hops    HopSetter
+	hopErr  string // last port hopping error, to log each change once
 	log     *slog.Logger
 	now     func() time.Time
 	trigger chan struct{}
@@ -41,6 +47,14 @@ func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr str
 		trigger: make(chan struct{}, 1), coreDown: map[string]bool{},
 	}
 }
+
+// HopSetter applies UDP port hopping ranges (the root network helper).
+type HopSetter interface {
+	SetHops(ctx context.Context, hops []nethelper.Hop) error
+}
+
+// SetHops gives the syncer the network helper for Hysteria port hopping.
+func (s *Syncer) SetHops(h HopSetter) { s.hops = h }
 
 // SetRouting gives the syncer the routing settings to compile with.
 func (s *Syncer) SetRouting(r *Routing) { s.routing = r }
@@ -195,7 +209,45 @@ func (s *Syncer) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{
+	err = s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{
 		"xray": xrayCfg, "hysteria": hyCfg, "singbox": sbCfg,
 	}})
+	s.applyHops(ctx, inbounds)
+	return err
 }
+
+// applyHops sends the port hopping ranges of enabled Hysteria2 inbounds to
+// the network helper (which ignores an unchanged list).
+func (s *Syncer) applyHops(ctx context.Context, inbounds []store.Inbound) {
+	if s.hops == nil {
+		return
+	}
+	hops := []nethelper.Hop{}
+	for _, ib := range inbounds {
+		h := ib.Settings.Hysteria
+		if !ib.Enabled || h == nil || h.HopPorts == "" {
+			continue
+		}
+		lo, hi, _ := strings.Cut(h.HopPorts, "-")
+		a, _ := strconv.Atoi(lo)
+		b, _ := strconv.Atoi(hi)
+		hops = append(hops, nethelper.Hop{From: a, To: b, Target: ib.Port})
+	}
+	err := s.hops.SetHops(ctx, hops)
+	if errors.Is(err, nethelper.ErrNoHelper) && len(hops) == 0 {
+		err = nil // nothing asked for; a missing helper does not matter
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	if msg != s.hopErr {
+		s.hopErr = msg
+		if msg != "" {
+			s.log.Warn("port hopping", "err", msg)
+			s.events.Add(ctx, EventHopFailed, "warning", 0, "", map[string]any{"error": msg})
+		}
+	}
+}
+
+const EventHopFailed = "hop.failed"

@@ -342,6 +342,8 @@ function toInput(ib: Inbound): InboundInput {
     masquerade: ib.masquerade ?? '',
     upMbps: ib.upMbps ?? 0,
     downMbps: ib.downMbps ?? 0,
+    hopPorts: ib.hopPorts ?? '',
+    hopInterval: ib.hopInterval ?? 0,
     enabled: ib.enabled,
     expert: ib.expert ?? {},
   }
@@ -364,6 +366,8 @@ const emptyInput: InboundInput = {
   masquerade: 'https://www.bing.com/',
   upMbps: 0,
   downMbps: 0,
+  hopPorts: '',
+  hopInterval: 0,
   enabled: true,
   expert: {},
 }
@@ -549,6 +553,16 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                   </Field>
                 </div>
                 <p className="-mt-2 text-xs text-muted-foreground">{t('inbounds.bandwidthHint')}</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t('inbounds.hopPorts')} hint={t('inbounds.hopPortsHint')} error={errors.hopPorts}>
+                    {(id) => <Input id={id} value={form.hopPorts} onChange={(e) => set('hopPorts', e.target.value)} placeholder="20000-30000" />}
+                  </Field>
+                  <Field label={t('inbounds.hopInterval')} error={errors.hopInterval}>
+                    {(id) => (
+                      <Input id={id} inputMode="numeric" value={form.hopInterval ? String(form.hopInterval) : ''} onChange={(e) => set('hopInterval', num(e.target.value))} placeholder="30" disabled={!form.hopPorts} />
+                    )}
+                  </Field>
+                </div>
               </>
             )}
 

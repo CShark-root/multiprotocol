@@ -85,6 +85,10 @@ type HysteriaSettings struct {
 	Masquerade   string `json:"masquerade"` // site shown to anyone who is not a Hysteria client
 	UpMbps       int    `json:"upMbps,omitempty"`
 	DownMbps     int    `json:"downMbps,omitempty"`
+	// HopPorts "20000-30000": UDP ports redirected to the inbound (port
+	// hopping); empty = off. HopInterval in seconds for clients.
+	HopPorts    string `json:"hopPorts,omitempty"`
+	HopInterval int    `json:"hopInterval,omitempty"`
 }
 
 type RealitySettings struct {

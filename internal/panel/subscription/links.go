@@ -123,6 +123,11 @@ func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
 		q.Set("obfs", "salamander")
 		q.Set("obfs-password", h.ObfsPassword)
 	}
+	if h.HopPorts != "" {
+		// Port hopping: the URI keeps one port so every parser accepts it;
+		// clients that hop read the range from mport.
+		q.Set("mport", h.HopPorts)
+	}
 	return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", url.PathEscape(u.UUID), endpoint(ib, host), q.Encode(), fragment(ib, u))
 }
 

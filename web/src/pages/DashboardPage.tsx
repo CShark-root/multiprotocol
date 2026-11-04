@@ -90,7 +90,7 @@ export function DashboardPage() {
         {traffic.data ? <TrafficChart data={traffic.data} /> : <div className="h-[180px]" />}
       </Card>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Card>
           <h2 className="font-semibold">{t('dashboard.cores')}</h2>
           {agent && agent.cores.length > 0 ? (
@@ -124,6 +124,30 @@ export function DashboardPage() {
             <p className="mt-2 text-sm text-muted-foreground">{t('dashboard.coresEmpty')}</p>
           )}
           <ServerActions hasAgent={Boolean(agent)} />
+        </Card>
+
+        <Card>
+          <h2 className="font-semibold">{t('dashboard.server')}</h2>
+          {sys ? (
+            <dl className="mt-4 space-y-2.5 text-sm">
+              <Row label={t('dashboard.serverOs')} value={sys.osName || agent?.os || '—'} hint={sys.kernel ? `${t('dashboard.serverKernel')} ${sys.kernel}` : undefined} />
+              <Row
+                label={t('dashboard.serverDisk')}
+                value={sys.diskTotal ? t('dashboard.freeOf', { free: formatBytes(sys.diskFree, lng), total: formatBytes(sys.diskTotal, lng) }) : '—'}
+                warn={sys.diskTotal > 0 && sys.diskFree / sys.diskTotal < 0.1}
+              />
+              <Row label={t('dashboard.serverSwap')} value={sys.swapTotal ? t('dashboard.freeOf', { free: formatBytes(sys.swapFree, lng), total: formatBytes(sys.swapTotal, lng) }) : t('dashboard.serverNoSwap')} />
+              <Row
+                label={t('dashboard.serverTcp')}
+                value={sys.congestion ? `${sys.congestion}${sys.qdisc ? ' + ' + sys.qdisc : ''}` : '—'}
+                hint={sys.congestion && sys.congestion !== 'bbr' ? t('dashboard.serverNoBbr') : undefined}
+                warn={Boolean(sys.congestion) && sys.congestion !== 'bbr'}
+              />
+              <Row label={t('dashboard.serverCpu')} value={t('dashboard.serverCpuValue', { count: sys.cpus, procs: sys.processes })} />
+            </dl>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">{t('dashboard.noAgent')}</p>
+          )}
         </Card>
 
         <Card>
@@ -251,6 +275,18 @@ function ServerActions({ hasAgent }: { hasAgent: boolean }) {
           </div>
         </form>
       </Dialog>
+    </div>
+  )
+}
+
+function Row({ label, value, hint, warn }: { label: string; value: string; hint?: string; warn?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right">
+        <div className={warn ? 'font-medium text-warning' : 'font-medium'}>{value}</div>
+        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+      </dd>
     </div>
   )
 }
