@@ -110,6 +110,19 @@ export type RoutingSettings = {
 }
 export type Trace = { ip: string; country: string; warp: string; latencyMs: number }
 
+export type DomainInfo = {
+  name: string
+  domain: string
+  hasToken: boolean
+  ipMode: 'auto' | 'custom'
+  ip: string
+  staging: boolean
+  status: { ipUpdatedAt: string; ipError: string; lastAttempt: string; lastError: string; progress: string }
+  cert: { domain: string; notAfter: string; issuer: string; staging: boolean } | null
+  publicHost: string
+  terms: string
+}
+
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
 export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
@@ -325,6 +338,12 @@ export const api = {
     request<{ admin: Admin }>('POST', 'auth/login', code ? { username, password, code } : { username, password }),
   logout: () => request<void>('POST', 'auth/logout'),
   system: () => request<SystemInfo>('GET', 'system'),
+  domain: {
+    get: () => request<DomainInfo>('GET', 'domain'),
+    save: (d: { name: string; token: string; ipMode: string; ip: string; staging: boolean }) => request<DomainInfo>('PUT', 'domain', d),
+    issue: () => request<{ started: boolean }>('POST', 'domain/issue', {}),
+    remove: () => request<DomainInfo>('DELETE', 'domain'),
+  },
   restartCores: () => request<void>('POST', 'system/restart-cores', {}),
   reboot: (password: string) => request<{ rebooting: boolean }>('POST', 'system/reboot', { password }),
   online: () => request<OnlineEntry[]>('GET', 'online'),

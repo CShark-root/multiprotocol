@@ -89,8 +89,10 @@ func singboxOutbounds(ib store.Inbound, u store.User, host string) []map[string]
 		}
 		return t
 	}
-	insecureTLS := func(sni string, alpn []string) map[string]any {
-		t := map[string]any{"enabled": true, "server_name": sni, "insecure": true}
+	// Self-signed certificates are accepted as is; the domain certificate is
+	// verified like any website's.
+	insecureTLS := func(sni string, alpn []string, trusted bool) map[string]any {
+		t := map[string]any{"enabled": true, "server_name": sni, "insecure": !trusted}
 		if alpn != nil {
 			t["alpn"] = alpn
 		}
@@ -125,17 +127,17 @@ func singboxOutbounds(ib store.Inbound, u store.User, host string) []map[string]
 		o["password"] = s.Shadowsocks.ServerPSK + ":" + compile.SSUserKey(u.UUID)
 	case "hysteria2":
 		o["type"], o["password"] = "hysteria2", u.UUID
-		o["tls"] = insecureTLS(s.Hysteria.SNI, nil)
+		o["tls"] = insecureTLS(s.Hysteria.SNI, nil, s.Hysteria.DomainCert)
 		if s.Hysteria.ObfsPassword != "" {
 			o["obfs"] = map[string]any{"type": "salamander", "password": s.Hysteria.ObfsPassword}
 		}
 	case "tuic":
 		o["type"], o["uuid"], o["password"] = "tuic", u.UUID, u.UUID
 		o["congestion_control"], o["udp_relay_mode"] = "bbr", "native"
-		o["tls"] = insecureTLS(s.TLS.SNI, []string{"h3"})
+		o["tls"] = insecureTLS(s.TLS.SNI, []string{"h3"}, s.TLS.DomainCert)
 	case "anytls":
 		o["type"], o["password"] = "anytls", u.UUID
-		o["tls"] = insecureTLS(s.TLS.SNI, nil)
+		o["tls"] = insecureTLS(s.TLS.SNI, nil, s.TLS.DomainCert)
 	case "shadowtls":
 		hsHost, _, _ := net.SplitHostPort(s.ShadowTLS.Handshake)
 		stls := map[string]any{

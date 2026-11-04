@@ -34,6 +34,7 @@ type Deps struct {
 	Store      *store.Store // read-only views: logs, events, audit
 	Scanner    *service.Scanner
 	Routing    *service.Routing
+	Domains    *service.Domains
 	Reboot     func() error // nil where rebooting is not possible (dev, tests)
 	Panel      PanelConfig
 	Agent      *agent.Agent // nil when the panel runs without a local agent
@@ -94,6 +95,10 @@ func New(d Deps) http.Handler {
 					r.Post("/{id}/reset-traffic", s.resetUserTraffic)
 				})
 				r.Get("/online", s.online)
+				r.Get("/domain", s.getDomain)
+				r.Put("/domain", s.saveDomain)
+				r.Post("/domain/issue", s.issueCert)
+				r.Delete("/domain", s.deleteDomain)
 				r.Route("/routing", func(r chi.Router) {
 					r.Get("/", s.getRouting)
 					r.Put("/", s.saveRouting)

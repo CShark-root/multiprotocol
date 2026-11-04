@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"panel/internal/panel/domain"
 	"panel/internal/panel/store"
 	"panel/internal/panel/tlsutil"
 	"panel/internal/panel/validate"
@@ -127,7 +128,14 @@ type Inbounds struct {
 	changed   func()
 	panelPort int
 	portFree  func(network string, port int) error
+	// certFor returns the domain certificate when it covers an SNI (nil when
+	// there is no domain): such inbounds get a real certificate.
+	certFor func(sni string) *domain.Cert
 }
+
+// UseDomainCerts makes inbounds whose SNI is the panel domain use its
+// certificate.
+func (s *Inbounds) UseDomainCerts(fn func(sni string) *domain.Cert) { s.certFor = fn }
 
 func NewInbounds(st *store.Store, changed func(), panelPort int) *Inbounds {
 	if changed == nil {
@@ -159,7 +167,7 @@ func (s *Inbounds) create(ctx context.Context, in InboundInput, testKit bool) (s
 	if err != nil {
 		return store.Inbound{}, err
 	}
-	if err := fillSecrets(&f, in, nil); err != nil {
+	if err := fillSecrets(&f, in, nil, s.certFor); err != nil {
 		return store.Inbound{}, err
 	}
 	f.TestKit = testKit
@@ -175,7 +183,7 @@ func (s *Inbounds) Update(ctx context.Context, adminID, id int64, in InboundInpu
 	if err != nil {
 		return store.Inbound{}, err
 	}
-	if err := fillSecrets(&f, in, &cur); err != nil {
+	if err := fillSecrets(&f, in, &cur, s.certFor); err != nil {
 		return store.Inbound{}, err
 	}
 	f.TestKit = cur.TestKit
@@ -384,7 +392,7 @@ func normalizePath(v, field string) (string, error) {
 // fillSecrets generates keys, certificates and passwords on create and
 // carries them over on update: regenerating them would silently break every
 // client. A certificate is reissued only when its SNI changes.
-func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound) error {
+func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound, certFor func(string) *domain.Cert) error {
 	var old store.InboundSettings
 	if cur != nil {
 		old = cur.Settings
@@ -404,7 +412,9 @@ func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound) er
 		}
 	}
 	if h := f.Settings.Hysteria; h != nil {
-		if old.Hysteria != nil && old.Hysteria.SNI == h.SNI {
+		if c := domainCert(certFor, h.SNI); c != nil {
+			h.CertPEM, h.KeyPEM, h.PinSHA256, h.DomainCert = string(c.CertPEM), string(c.KeyPEM), "", true
+		} else if old.Hysteria != nil && old.Hysteria.SNI == h.SNI && !old.Hysteria.DomainCert {
 			h.CertPEM, h.KeyPEM, h.PinSHA256 = old.Hysteria.CertPEM, old.Hysteria.KeyPEM, old.Hysteria.PinSHA256
 		} else {
 			var err error
@@ -420,7 +430,9 @@ func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound) er
 		}
 	}
 	if t := f.Settings.TLS; t != nil {
-		if old.TLS != nil && old.TLS.SNI == t.SNI {
+		if c := domainCert(certFor, t.SNI); c != nil {
+			t.CertPEM, t.KeyPEM, t.PinSHA256, t.DomainCert = string(c.CertPEM), string(c.KeyPEM), "", true
+		} else if old.TLS != nil && old.TLS.SNI == t.SNI && !old.TLS.DomainCert {
 			t.CertPEM, t.KeyPEM, t.PinSHA256 = old.TLS.CertPEM, old.TLS.KeyPEM, old.TLS.PinSHA256
 		} else {
 			var err error
@@ -678,4 +690,71 @@ func writeAudit(ctx context.Context, st *store.Store, now time.Time, adminID int
 	if err != nil {
 		slog.Warn("audit log write failed", "action", action, "err", err)
 	}
+}
+
+func domainCert(certFor func(string) *domain.Cert, sni string) *domain.Cert {
+	if certFor == nil {
+		return nil
+	}
+	return certFor(sni)
+}
+
+// RefreshDomainCerts re-applies certificates after the domain certificate
+// was issued, renewed or removed: inbounds whose SNI is the domain switch to
+// it (or back to a self-signed one).
+func (s *Inbounds) RefreshDomainCerts(ctx context.Context) error {
+	list, err := s.store.ListInbounds(ctx)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for _, ib := range list {
+		var sni string
+		var wasDomain bool
+		switch {
+		case ib.Settings.Hysteria != nil:
+			sni, wasDomain = ib.Settings.Hysteria.SNI, ib.Settings.Hysteria.DomainCert
+		case ib.Settings.TLS != nil:
+			sni, wasDomain = ib.Settings.TLS.SNI, ib.Settings.TLS.DomainCert
+		default:
+			continue
+		}
+		c := domainCert(s.certFor, sni)
+		if c == nil && !wasDomain {
+			continue
+		}
+		f := store.InboundFields{Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
+			Port: ib.Port, Address: ib.Address, Settings: ib.Settings, Enabled: ib.Enabled, TestKit: ib.TestKit}
+		set := func(certPEM, keyPEM, pin *string, flag *bool) error {
+			if c != nil {
+				*certPEM, *keyPEM, *pin, *flag = string(c.CertPEM), string(c.KeyPEM), "", true
+				return nil
+			}
+			var err error
+			*certPEM, *keyPEM, *pin, err = tlsutil.SelfSignedFor(sni)
+			*flag = false
+			return err
+		}
+		if h := f.Settings.Hysteria; h != nil {
+			hc := *h
+			if err := set(&hc.CertPEM, &hc.KeyPEM, &hc.PinSHA256, &hc.DomainCert); err != nil {
+				return err
+			}
+			f.Settings.Hysteria = &hc
+		} else {
+			tc := *f.Settings.TLS
+			if err := set(&tc.CertPEM, &tc.KeyPEM, &tc.PinSHA256, &tc.DomainCert); err != nil {
+				return err
+			}
+			f.Settings.TLS = &tc
+		}
+		if _, err := s.store.UpdateInbound(ctx, ib.ID, f, s.now()); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if changed {
+		s.changed()
+	}
+	return nil
 }

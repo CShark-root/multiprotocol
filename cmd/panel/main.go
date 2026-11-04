@@ -33,6 +33,7 @@ import (
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
+	"panel/internal/panel/domain"
 	"panel/internal/panel/geo"
 	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
@@ -119,6 +120,7 @@ func serve(args []string) int {
 	events := service.NewEvents(st)
 
 	authSvc := auth.NewService(st)
+	domains := service.NewDomains(st, events, *dataDir, log)
 	var localAgent *agent.Agent
 	var syncer *service.Syncer
 	changed := func() {}
@@ -158,11 +160,21 @@ func serve(args []string) int {
 		subBase = fmt.Sprintf("http://%s/%s/", net.JoinHostPort(cfg.PublicHost, strconv.Itoa(cfg.LANSubPort)), cfg.SubPath)
 	}
 
+	inboundsSvc := service.NewInbounds(st, changed, panelPort)
+	inboundsSvc.UseDomainCerts(domains.CertFor)
+	domains.OnCert(func(ctx context.Context, _ *domain.Cert) {
+		if err := inboundsSvc.RefreshDomainCerts(ctx); err != nil {
+			log.Warn("apply domain certificate to inbounds", "err", err)
+		}
+	})
+	go domains.Run(ctx)
+
 	handler := api.New(api.Deps{
 		BasePath:   cfg.BasePath,
 		Auth:       authSvc,
 		Users:      service.NewUsers(st, changed),
-		Inbounds:   service.NewInbounds(st, changed, panelPort),
+		Inbounds:   inboundsSvc,
+		Domains:    domains,
 		Syncer:     syncer,
 		Events:     events,
 		Journal:    hub,
@@ -213,10 +225,12 @@ func serve(args []string) int {
 			log.Error("tls certificate", "err", err)
 			return 1
 		}
+		// The domain's Let's Encrypt certificate when the client asks for the
+		// domain (renewals apply without a restart), the self-signed one for an IP.
 		tlsCfg := &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{cert},
-			NextProtos:   []string{"h2", "http/1.1"},
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: domains.GetCertificate(cert),
+			NextProtos:     []string{"h2", "http/1.1"},
 		}
 		ln = tls.NewListener(stealth.TLSOnlyListener(raw), tlsCfg)
 		if created {

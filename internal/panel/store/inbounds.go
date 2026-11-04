@@ -61,6 +61,9 @@ type TLSSettings struct {
 	CertPEM   string `json:"certPem"`
 	KeyPEM    string `json:"keyPem"`
 	PinSHA256 string `json:"pinSha256"`
+	// DomainCert: the certificate is the panel domain's (trusted), not
+	// self-signed; links then need neither pinning nor "insecure".
+	DomainCert bool `json:"domainCert,omitempty"`
 }
 
 type ShadowsocksSettings struct {
@@ -77,6 +80,7 @@ type HysteriaSettings struct {
 	CertPEM      string `json:"certPem"`
 	KeyPEM       string `json:"keyPem"`
 	PinSHA256    string `json:"pinSha256"` // lets clients pin the self-signed cert
+	DomainCert   bool   `json:"domainCert,omitempty"`
 	ObfsPassword string `json:"obfsPassword,omitempty"`
 	Masquerade   string `json:"masquerade"` // site shown to anyone who is not a Hysteria client
 	UpMbps       int    `json:"upMbps,omitempty"`

@@ -108,15 +108,17 @@ func ShadowsocksLink(ib store.Inbound, u store.User, host string) string {
 	return fmt.Sprintf("ss://%s@%s#%s", userinfo.String(), endpoint(ib, host), fragment(ib, u))
 }
 
-// Hysteria2Link returns a hysteria2:// URI (official scheme). The
-// certificate is self-signed, so the link pins it and sets insecure=1 for
-// clients that cannot pin.
+// Hysteria2Link returns a hysteria2:// URI (official scheme). A self-signed
+// certificate is pinned, with insecure=1 for clients that cannot pin; the
+// domain certificate is simply verified.
 func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
 	h := ib.Settings.Hysteria
 	q := url.Values{}
 	q.Set("sni", h.SNI)
-	q.Set("insecure", "1")
-	q.Set("pinSHA256", h.PinSHA256)
+	if !h.DomainCert {
+		q.Set("insecure", "1")
+		q.Set("pinSHA256", h.PinSHA256)
+	}
 	if h.ObfsPassword != "" {
 		q.Set("obfs", "salamander")
 		q.Set("obfs-password", h.ObfsPassword)
@@ -130,14 +132,18 @@ func TUICLink(ib store.Inbound, u store.User, host string) string {
 	q.Set("alpn", "h3")
 	q.Set("congestion_control", "bbr")
 	q.Set("udp_relay_mode", "native")
-	q.Set("allow_insecure", "1")
+	if !ib.Settings.TLS.DomainCert {
+		q.Set("allow_insecure", "1")
+	}
 	return fmt.Sprintf("tuic://%s@%s?%s#%s", url.UserPassword(u.UUID, u.UUID).String(), endpoint(ib, host), q.Encode(), fragment(ib, u))
 }
 
 func AnyTLSLink(ib store.Inbound, u store.User, host string) string {
 	q := url.Values{}
 	q.Set("sni", ib.Settings.TLS.SNI)
-	q.Set("insecure", "1")
+	if !ib.Settings.TLS.DomainCert {
+		q.Set("insecure", "1")
+	}
 	return fmt.Sprintf("anytls://%s@%s/?%s#%s", url.PathEscape(u.UUID), endpoint(ib, host), q.Encode(), fragment(ib, u))
 }
 

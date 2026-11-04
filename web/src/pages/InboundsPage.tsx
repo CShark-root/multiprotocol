@@ -375,6 +375,9 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
   const p = form.protocol
   const spec = protocolSpecs[p]
   const suggest = useQuery({ queryKey: ['inbounds', 'suggest', p], queryFn: () => api.inbounds.suggest(p), enabled: !inbound, staleTime: 0 })
+  const domainInfo = useQuery({ queryKey: ['domain'], queryFn: api.domain.get, staleTime: 60_000 })
+  // A trusted certificate is offered for TLS inbounds once the domain has one.
+  const domainName = domainInfo.data?.cert && !domainInfo.data.cert.staging ? domainInfo.data.cert.domain : ''
   const [advanced, setAdvanced] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const set = <K extends keyof InboundInput>(k: K, v: InboundInput[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -522,6 +525,17 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
               <Field label={t('inbounds.hySni')} hint={t('inbounds.hySniHint')} error={errors.serverName}>
                 {(id) => <Input id={id} value={form.serverName} onChange={(e) => set('serverName', e.target.value)} placeholder="www.bing.com" />}
               </Field>
+            )}
+            {(p === 'hysteria2' || certProtocols.includes(p)) && domainName && (
+              <button
+                type="button"
+                onClick={() => set('serverName', domainName)}
+                aria-pressed={form.serverName === domainName}
+                className={'-mt-2 rounded-full border px-3 py-1 text-xs transition ' + (form.serverName === domainName ? 'border-primary bg-accent text-accent-foreground' : 'hover:bg-card')}
+              >
+                {form.serverName === domainName ? '✓ ' : ''}
+                {t('inbounds.useDomainCert', { domain: domainName })}
+              </button>
             )}
 
             {p === 'hysteria2' && (

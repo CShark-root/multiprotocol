@@ -65,6 +65,7 @@ func newClient(t *testing.T) *client {
 		Inbounds: service.NewInbounds(st, nil, 1),
 		Events:   service.NewEvents(st),
 		Routing:  service.NewRouting(st, service.NewEvents(st), t.TempDir(), nil, nil, slog.Default()),
+		Domains:  service.NewDomains(st, service.NewEvents(st), t.TempDir(), slog.Default()),
 		Journal:  journal.NewHub(st),
 		Store:    st,
 		Agent:    agent.New(),
@@ -575,4 +576,15 @@ func TestServerActions(t *testing.T) {
 	// The test server has no reboot hook; the password is checked first
 	// only where rebooting is possible.
 	c.expect(501, "POST", "/api/system/reboot", map[string]string{"password": "a-long-enough-password"})
+}
+
+func TestDomainEndpoints(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	got := c.expect(200, "GET", "/api/domain", nil)
+	if got["hasToken"] != false || got["cert"] != nil || got["ipMode"] != "auto" {
+		t.Fatalf("defaults: %v", got)
+	}
+	c.expect(400, "PUT", "/api/domain", map[string]any{"name": "my vpn", "token": "x", "ipMode": "auto"})
+	c.expect(409, "POST", "/api/domain/issue", nil)
 }
