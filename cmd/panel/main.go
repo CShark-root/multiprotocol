@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -197,6 +198,8 @@ func serve(args []string) int {
 		}
 	})
 	go domains.Run(ctx)
+	notifier := service.NewNotifier(st, events, *dataDir, cfg.PublicHost, log)
+	go notifier.Run(ctx)
 
 	handler := api.New(api.Deps{
 		BasePath:   cfg.BasePath,
@@ -204,6 +207,7 @@ func serve(args []string) int {
 		Users:      service.NewUsers(st, changed),
 		Inbounds:   inboundsSvc,
 		Domains:    domains,
+		Telegram:   notifier,
 		Amnezia:    amneziaClient(*dev),
 		Syncer:     syncer,
 		Events:     events,
@@ -519,13 +523,22 @@ func restoreCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: panel restore -data-dir DIR backup.tar.gz")
 		return 2
 	}
-	f, err := os.Open(fsFlags.Arg(0))
+	data, err := os.ReadFile(fsFlags.Arg(0))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer f.Close()
-	got, err := backup.Restore(f, *dataDir)
+	if backup.IsEncrypted(data) {
+		// From Telegram: encrypted. The password comes on stdin, never as an
+		// argument (it would show in the process list).
+		fmt.Fprintln(os.Stderr, "encrypted backup; enter its password:")
+		line, _ := bufio.NewReader(io.LimitReader(os.Stdin, 4096)).ReadString('\n')
+		if data, err = backup.Decrypt(data, strings.TrimRight(line, "\r\n")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+	got, err := backup.Restore(bytes.NewReader(data), *dataDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "restore:", err)
 		return 1

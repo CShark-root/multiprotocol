@@ -66,6 +66,7 @@ func newClient(t *testing.T) *client {
 		Events:   service.NewEvents(st),
 		Routing:  service.NewRouting(st, service.NewEvents(st), t.TempDir(), nil, nil, slog.Default()),
 		Domains:  service.NewDomains(st, service.NewEvents(st), t.TempDir(), slog.Default()),
+		Telegram: service.NewNotifier(st, service.NewEvents(st), t.TempDir(), "test", slog.Default()),
 		Journal:  journal.NewHub(st),
 		Store:    st,
 		Agent:    agent.New(),

@@ -155,6 +155,18 @@ export type AmneziaContainer = {
   note?: string
 }
 
+export type TelegramInfo = {
+  hasToken: boolean
+  chatId: number
+  chatName: string
+  events: string[]
+  allEvents: string[]
+  dailyBackup: boolean
+  hasBackupPassword: boolean
+  lastBackup: string
+  lastError: string
+}
+
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
 export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
@@ -400,6 +412,13 @@ export const api = {
         'system/update' + (check ? '?check=1' : ''),
       ),
     start: (cores: boolean) => request<{ started: boolean }>('POST', 'system/update', { cores }),
+  },
+  telegram: {
+    get: () => request<TelegramInfo>('GET', 'telegram'),
+    save: (s: { token: string; chatId: number; chatName: string; events: string[]; dailyBackup: boolean; backupPassword: string }) => request<TelegramInfo>('PUT', 'telegram', s),
+    findChat: (token: string) => request<{ id: number; name: string }>('POST', 'telegram/find-chat', { token }),
+    test: () => request<void>('POST', 'telegram/test', {}),
+    backup: () => request<void>('POST', 'telegram/backup', {}),
   },
   restartCores: () => request<void>('POST', 'system/restart-cores', {}),
   reboot: (password: string) => request<{ rebooting: boolean }>('POST', 'system/reboot', { password }),

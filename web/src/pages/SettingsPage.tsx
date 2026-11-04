@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Download, Globe, KeyRound, Monitor, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Archive, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
@@ -69,6 +69,7 @@ export function SettingsPage() {
             <>
               <UpdateCard />
               <BackupCard />
+              <TelegramCard />
             </>
           )}
         </div>
@@ -833,6 +834,123 @@ function UpdateCard() {
             </Button>
           </div>
         </details>
+      </div>
+    </Section>
+  )
+}
+
+function TelegramCard() {
+  const { t, i18n } = useTranslation()
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['telegram'], queryFn: api.telegram.get })
+  const [token, setToken] = useState('')
+  const [form, setForm] = useState<{ chatId: number; chatName: string; events: string[]; dailyBackup: boolean; backupPassword: string } | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const d = q.data
+  useEffect(() => {
+    if (d && !form) setForm({ chatId: d.chatId, chatName: d.chatName, events: d.events, dailyBackup: d.dailyBackup, backupPassword: '' })
+  }, [d, form])
+  const fail = (e: unknown) => setMsg({ ok: false, text: e instanceof ApiError ? e.message : t('common.error') })
+  const save = useMutation({
+    mutationFn: () => api.telegram.save({ token, ...form! }),
+    onSuccess: (data) => {
+      qc.setQueryData(['telegram'], data)
+      setToken('')
+      setForm({ ...form!, backupPassword: '' })
+      setMsg({ ok: true, text: t('telegram.saved') })
+    },
+    onError: fail,
+  })
+  const find = useMutation({
+    mutationFn: () => api.telegram.findChat(token),
+    onSuccess: (c) => {
+      setForm({ ...form!, chatId: c.id, chatName: c.name })
+      setMsg({ ok: true, text: t('telegram.found', { name: c.name }) })
+    },
+    onError: fail,
+  })
+  const test = useMutation({ mutationFn: api.telegram.test, onSuccess: () => setMsg({ ok: true, text: t('telegram.testSent') }), onError: fail })
+  const backupNow = useMutation({
+    mutationFn: api.telegram.backup,
+    onSuccess: () => {
+      setMsg({ ok: true, text: t('telegram.backupSent') })
+      qc.invalidateQueries({ queryKey: ['telegram'] })
+    },
+    onError: fail,
+  })
+  if (!d || !form) return null
+  const ready = d.hasToken && d.chatId !== 0
+  const toggle = (e: string) => setForm({ ...form, events: form.events.includes(e) ? form.events.filter((x) => x !== e) : [...form.events, e] })
+
+  return (
+    <Section icon={<Send className="h-4 w-4" />} title={t('telegram.title')} hint={t('telegram.hint')}>
+      <div className="space-y-4">
+        {!d.hasToken && (
+          <ol className="list-decimal space-y-1 rounded-xl bg-muted/60 p-3.5 pl-8 text-sm text-muted-foreground">
+            <li>{t('telegram.step1')}</li>
+            <li>{t('telegram.step2')}</li>
+            <li>{t('telegram.step3')}</li>
+          </ol>
+        )}
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field label={t('telegram.token')} hint={d.hasToken ? t('domain.tokenSaved') : undefined}>
+            {(id) => <Input id={id} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={d.hasToken ? '••••••••' : '123456789:AAE…'} />}
+          </Field>
+          <Button variant="secondary" disabled={find.isPending || (!token && !d.hasToken)} onClick={() => find.mutate()}>
+            {t('telegram.findChat')}
+          </Button>
+        </div>
+        <p className="text-sm">
+          {t('telegram.chat')}: {form.chatId ? <span className="font-medium">{form.chatName || form.chatId}</span> : <span className="text-muted-foreground">{t('telegram.noChat')}</span>}
+        </p>
+
+        <div>
+          <div className="text-sm font-medium">{t('telegram.events')}</div>
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            {d.allEvents.map((e) => (
+              <label key={e} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.events.includes(e)} onChange={() => toggle(e)} />
+                {t(`telegram.ev.${e.replace('.', '_')}`)}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-muted/60 p-3.5">
+          <label className="flex items-start gap-2.5 text-sm">
+            <input type="checkbox" className="mt-1" checked={form.dailyBackup} onChange={(e) => setForm({ ...form, dailyBackup: e.target.checked })} />
+            <span>
+              {t('telegram.dailyBackup')}
+              <span className="block text-xs text-muted-foreground">{t('telegram.dailyBackupHint')}</span>
+            </span>
+          </label>
+          {form.dailyBackup && (
+            <div className="mt-3">
+              <Field label={t('telegram.backupPassword')} hint={d.hasBackupPassword ? t('telegram.backupPasswordSaved') : t('telegram.backupPasswordHint')}>
+                {(id) => <Input id={id} type="password" autoComplete="new-password" value={form.backupPassword} onChange={(e) => setForm({ ...form, backupPassword: e.target.value })} />}
+              </Field>
+            </div>
+          )}
+          {d.lastBackup && !d.lastBackup.startsWith('0001') && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t('telegram.lastBackup', { time: new Date(d.lastBackup).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }) })}
+            </p>
+          )}
+          {d.lastError && <p className="mt-1 text-xs text-destructive">{d.lastError}</p>}
+        </div>
+
+        {msg && <p className={'text-sm ' + (msg.ok ? 'text-success' : 'text-destructive')}>{msg.text}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={save.isPending} onClick={() => save.mutate()}>
+            {t('common.save')}
+          </Button>
+          <Button variant="secondary" disabled={!ready || test.isPending} onClick={() => test.mutate()}>
+            {t('telegram.test')}
+          </Button>
+          <Button variant="ghost" disabled={!ready || !d.hasBackupPassword || backupNow.isPending} onClick={() => backupNow.mutate()}>
+            {t('telegram.backupNow')}
+          </Button>
+        </div>
       </div>
     </Section>
   )

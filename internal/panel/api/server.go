@@ -36,6 +36,7 @@ type Deps struct {
 	Scanner    *service.Scanner
 	Routing    *service.Routing
 	Domains    *service.Domains
+	Telegram   *service.Notifier
 	Amnezia    *amnezia.HelperClient // nil: no Amnezia tab data
 	Reboot     func() error          // nil where rebooting is not possible (dev, tests)
 	Panel      PanelConfig
@@ -102,6 +103,11 @@ func New(d Deps) http.Handler {
 				r.Get("/online", s.online)
 				r.Get("/amnezia", s.amneziaStatus)
 				r.Get("/amnezia/logs", s.amneziaLogs)
+				r.Get("/telegram", s.getTelegram)
+				r.Put("/telegram", s.saveTelegram)
+				r.Post("/telegram/find-chat", s.findTelegramChat)
+				r.Post("/telegram/test", s.testTelegram)
+				r.Post("/telegram/backup", s.telegramBackup)
 				r.Get("/domain", s.getDomain)
 				r.Put("/domain", s.saveDomain)
 				r.Post("/domain/issue", s.issueCert)

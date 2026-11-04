@@ -66,3 +66,20 @@ func TestRestoreIgnoresForeignPaths(t *testing.T) {
 		t.Fatal("wrote outside the data dir")
 	}
 }
+
+func TestEncryptRoundTrip(t *testing.T) {
+	plain := []byte("tar.gz bytes")
+	enc, err := Encrypt(plain, "a long passphrase")
+	if err != nil || !IsEncrypted(enc) || bytes.Contains(enc, plain) {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if got, err := Decrypt(enc, "a long passphrase"); err != nil || !bytes.Equal(got, plain) {
+		t.Fatalf("decrypt: %q %v", got, err)
+	}
+	if _, err := Decrypt(enc, "wrong password!"); err != ErrBadPassword {
+		t.Fatalf("wrong password: %v", err)
+	}
+	if _, err := Encrypt(plain, "short"); err == nil {
+		t.Fatal("accepted a short password")
+	}
+}

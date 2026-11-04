@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"panel/internal/panel/config"
+	"panel/internal/panel/routing"
 	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
-	"panel/internal/panel/routing"
 	"panel/internal/panel/store"
 	"panel/internal/panel/subscription"
 )
