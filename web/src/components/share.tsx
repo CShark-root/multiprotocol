@@ -31,14 +31,21 @@ export function CopyButton({ text }: { text: string }) {
 }
 
 export function QrImage({ text, size = 220 }: { text: string; size?: number }) {
+  const { t } = useTranslation()
   const [src, setSrc] = useState('')
+  const [tooLong, setTooLong] = useState(false)
   useEffect(() => {
     let alive = true
-    QRCode.toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: 'M' }).then((url) => alive && setSrc(url))
+    setTooLong(false)
+    // Long keys (Amnezia vpn://) need the lowest error correction to fit, or do not fit at all.
+    QRCode.toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: text.length > 1500 ? 'L' : 'M' })
+      .then((url) => alive && setSrc(url))
+      .catch(() => alive && setTooLong(true))
     return () => {
       alive = false
     }
   }, [text, size])
+  if (tooLong) return <p className="text-sm text-muted-foreground">{t('connect.qrTooLong')}</p>
   return (
     <div className="inline-block rounded-xl bg-white p-2">
       {src ? <img src={src} width={size} height={size} alt="QR" /> : <div style={{ width: size, height: size }} />}

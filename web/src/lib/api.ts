@@ -59,6 +59,7 @@ export type User = {
   resetPeriod: ResetPeriod
   expireAt: string | null
   subToken: string
+  amneziaKey: string
   createdAt: string
   updatedAt: string
 }
@@ -70,6 +71,7 @@ export type UserInput = {
   trafficLimit: number
   resetPeriod: ResetPeriod
   expireAt: string | null
+  amneziaKey: string
 }
 
 export type OnlineEntry = { userId: number; ips: string[]; connections: number }
@@ -121,6 +123,21 @@ export type DomainInfo = {
   cert: { domain: string; notAfter: string; issuer: string; staging: boolean } | null
   publicHost: string
   terms: string
+}
+
+export type AmneziaClient = { name: string; id: string; created?: string; lastHandshake?: string; endpoint?: string; rxBytes: number; txBytes: number }
+export type AmneziaContainer = {
+  name: string
+  kind: string
+  image: string
+  state: string
+  status: string
+  startedAt: string
+  ports: string[]
+  cpu: number
+  memBytes: number
+  clients: AmneziaClient[]
+  note?: string
 }
 
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
@@ -343,6 +360,10 @@ export const api = {
     save: (d: { name: string; token: string; ipMode: string; ip: string; staging: boolean }) => request<DomainInfo>('PUT', 'domain', d),
     issue: () => request<{ started: boolean }>('POST', 'domain/issue', {}),
     remove: () => request<DomainInfo>('DELETE', 'domain'),
+  },
+  amnezia: {
+    status: () => request<{ helper: boolean; status?: { docker: boolean; containers: AmneziaContainer[]; checkedAt: string } }>('GET', 'amnezia'),
+    logs: (name: string) => request<string[]>('GET', 'amnezia/logs?tail=300&name=' + encodeURIComponent(name)),
   },
   restartCores: () => request<void>('POST', 'system/restart-cores', {}),
   reboot: (password: string) => request<{ rebooting: boolean }>('POST', 'system/reboot', { password }),

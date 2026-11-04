@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"panel/internal/agent/hysteria"
 	"panel/internal/agent/singbox"
 	"panel/internal/agent/xray"
+	"panel/internal/amnezia"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/config"
@@ -54,6 +56,8 @@ func main() {
 			os.Exit(showURL(os.Args[2:]))
 		case "set-host":
 			os.Exit(setHost(os.Args[2:]))
+		case "amnezia-helper":
+			os.Exit(amneziaHelper(os.Args[2:]))
 		}
 	}
 	os.Exit(serve(os.Args[1:]))
@@ -175,6 +179,7 @@ func serve(args []string) int {
 		Users:      service.NewUsers(st, changed),
 		Inbounds:   inboundsSvc,
 		Domains:    domains,
+		Amnezia:    amneziaClient(*dev),
 		Syncer:     syncer,
 		Events:     events,
 		Journal:    hub,
@@ -405,4 +410,35 @@ func rebootFunc(dev bool) func() error {
 		}
 		return nil
 	}
+}
+
+// amneziaHelper runs the read-only Docker helper (as root, from
+// panel-amnezia.service): the panel itself never gets Docker access.
+func amneziaHelper(args []string) int {
+	fsFlags := flag.NewFlagSet("amnezia-helper", flag.ExitOnError)
+	socket := fsFlags.String("socket", amnezia.HelperSocket, "unix socket to listen on")
+	group := fsFlags.String("group", "panel", "group allowed to connect")
+	fsFlags.Parse(args)
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	gid := -1
+	if g, err := user.LookupGroup(*group); err == nil {
+		gid, _ = strconv.Atoi(g.Gid)
+	} else {
+		log.Warn("group not found; socket stays root-only", "group", *group)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := amnezia.Serve(ctx, *socket, amnezia.DockerSocket, gid, log); err != nil {
+		log.Error("amnezia helper", "err", err)
+		return 1
+	}
+	return 0
+}
+
+// amneziaClient talks to the helper on Linux servers; dev runs have none.
+func amneziaClient(dev bool) *amnezia.HelperClient {
+	if dev || runtime.GOOS != "linux" {
+		return nil
+	}
+	return amnezia.NewClient(amnezia.HelperSocket)
 }

@@ -18,6 +18,7 @@ type User struct {
 	SubToken     string
 	UUID         string // VLESS credential
 	LastResetAt  time.Time
+	AmneziaKey   string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -30,10 +31,11 @@ type UserFields struct {
 	TrafficLimit int64
 	ResetPeriod  string
 	ExpireAt     *time.Time
+	AmneziaKey   string // vpn://... shared from the Amnezia app; shown only
 }
 
 const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, reset_period,
-	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at`
+	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key`
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY id`)
@@ -155,10 +157,10 @@ func (s *Store) PruneTrafficDaily(ctx context.Context, before string) error {
 
 func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid string, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users
-		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, uuid,
-		now.Unix(), now.Unix(), now.Unix())
+		now.Unix(), now.Unix(), now.Unix(), f.AmneziaKey)
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -174,9 +176,9 @@ func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid str
 
 func (s *Store) UpdateUser(ctx context.Context, id int64, f UserFields, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `UPDATE users SET
-		name = ?, note = ?, enabled = ?, traffic_limit = ?, reset_period = ?, expire_at = ?, updated_at = ?
+		name = ?, note = ?, enabled = ?, traffic_limit = ?, reset_period = ?, expire_at = ?, amnezia_key = ?, updated_at = ?
 		WHERE id = ?`,
-		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), now.Unix(), id)
+		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), f.AmneziaKey, now.Unix(), id)
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -226,7 +228,7 @@ func scanUser(row scanner) (User, error) {
 	var enabled, lastReset, created, updated int64
 	var expire sql.NullInt64
 	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.ResetPeriod,
-		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated)
+		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated, &u.AmneziaKey)
 	if err != nil {
 		return User{}, err
 	}

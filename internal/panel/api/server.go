@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"panel/internal/agent"
+	"panel/internal/amnezia"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
@@ -35,7 +36,8 @@ type Deps struct {
 	Scanner    *service.Scanner
 	Routing    *service.Routing
 	Domains    *service.Domains
-	Reboot     func() error // nil where rebooting is not possible (dev, tests)
+	Amnezia    *amnezia.HelperClient // nil: no Amnezia tab data
+	Reboot     func() error          // nil where rebooting is not possible (dev, tests)
 	Panel      PanelConfig
 	Agent      *agent.Agent // nil when the panel runs without a local agent
 	Web        fs.FS        // built frontend (web/dist)
@@ -95,6 +97,8 @@ func New(d Deps) http.Handler {
 					r.Post("/{id}/reset-traffic", s.resetUserTraffic)
 				})
 				r.Get("/online", s.online)
+				r.Get("/amnezia", s.amneziaStatus)
+				r.Get("/amnezia/logs", s.amneziaLogs)
 				r.Get("/domain", s.getDomain)
 				r.Put("/domain", s.saveDomain)
 				r.Post("/domain/issue", s.issueCert)

@@ -19,7 +19,7 @@ const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'>
 const resetPeriods: ResetPeriod[] = ['none', 'day', 'week', 'month']
 
 function toInput(u: User): UserInput {
-  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, resetPeriod: u.resetPeriod, expireAt: u.expireAt }
+  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, resetPeriod: u.resetPeriod, expireAt: u.expireAt, amneziaKey: u.amneziaKey }
 }
 
 export function UsersPage() {
@@ -239,6 +239,13 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
               </div>
             )}
           </div>
+          {user.amneziaKey && (
+            <div>
+              <div className="text-sm font-medium">Amnezia</div>
+              <p className="mb-2 text-xs text-muted-foreground">{t('connect.amneziaHint')}</p>
+              <ShareRow label={t('connect.amneziaKey')} text={user.amneziaKey} />
+            </div>
+          )}
           <div className="flex justify-end">
             <Button variant="secondary" onClick={onClose}>
               OK
@@ -258,6 +265,7 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
   const [resetPeriod, setResetPeriod] = useState<ResetPeriod>(user?.resetPeriod ?? 'none')
   const [expire, setExpire] = useState(toDateInput(user?.expireAt ?? null))
   const [enabled, setEnabled] = useState(user?.enabled ?? true)
+  const [amneziaKey, setAmneziaKey] = useState(user?.amneziaKey ?? '')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const save = useMutation({
@@ -277,7 +285,7 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
     e.preventDefault()
     setErrors({})
     const gb = Math.max(0, Number(limitGb.replace(',', '.')) || 0)
-    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), expireAt: fromDateInput(expire) })
+    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), expireAt: fromDateInput(expire), amneziaKey })
   }
 
   return (
@@ -307,6 +315,19 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
         </div>
         <Field label={t('users.expireAt')} hint={t('users.expireAtHint')} error={errors.expireAt}>
           {(id) => <Input id={id} type="date" value={expire} onChange={(e) => setExpire(e.target.value)} />}
+        </Field>
+        <Field label={t('users.amneziaKey')} hint={t('users.amneziaKeyHint')} error={errors.amneziaKey}>
+          {(id) => (
+            <textarea
+              id={id}
+              rows={2}
+              value={amneziaKey}
+              onChange={(e) => setAmneziaKey(e.target.value)}
+              placeholder="vpn://…"
+              spellCheck={false}
+              className="w-full rounded-xl border border-input bg-card px-3.5 py-2.5 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          )}
         </Field>
         <div className="flex items-start justify-between gap-4 rounded-xl bg-muted/60 p-3.5">
           <div>

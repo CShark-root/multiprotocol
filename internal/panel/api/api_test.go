@@ -588,3 +588,22 @@ func TestDomainEndpoints(t *testing.T) {
 	c.expect(400, "PUT", "/api/domain", map[string]any{"name": "my vpn", "token": "x", "ipMode": "auto"})
 	c.expect(409, "POST", "/api/domain/issue", nil)
 }
+
+func TestAmneziaKey(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	c.expect(400, "POST", "/api/users", map[string]any{"name": "a", "amneziaKey": "https://not-a-key"})
+	key := "vpn://AAAAeJyrVkrOz0vOz8lKBQAaoQRJ_test-key"
+	u := c.expect(201, "POST", "/api/users", map[string]any{"name": "a", "amneziaKey": " " + key + "\n"})
+	if u["amneziaKey"] != key {
+		t.Fatalf("key: %v", u["amneziaKey"])
+	}
+	id := itoa(int(u["id"].(float64)))
+	got := c.expect(200, "PUT", "/api/users/"+id, map[string]any{"name": "a", "enabled": false, "amneziaKey": key})
+	if got["amneziaKey"] != key || got["enabled"] != false {
+		t.Fatalf("after update: %v", got)
+	}
+	if st := c.expect(200, "GET", "/api/amnezia", nil); st["helper"] != false {
+		t.Fatalf("no helper in tests: %v", st)
+	}
+}

@@ -33,7 +33,7 @@ const nav: NavItem[] = [
   { to: '/nodes', key: 'nodes', icon: Server, soon: true },
   { to: '/routing', key: 'routing', icon: RouteIcon },
   { to: '/logs', key: 'logs', icon: Activity },
-  { to: '/amnezia', key: 'amnezia', icon: Shield, soon: true },
+  { to: '/amnezia', key: 'amnezia', icon: Shield },
   { to: '/settings', key: 'settings', icon: Settings },
 ]
 

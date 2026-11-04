@@ -22,6 +22,7 @@ type userDTO struct {
 	ResetPeriod  string     `json:"resetPeriod"`
 	ExpireAt     *time.Time `json:"expireAt"`
 	SubToken     string     `json:"subToken"`
+	AmneziaKey   string     `json:"amneziaKey"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
@@ -33,6 +34,7 @@ type userInputDTO struct {
 	TrafficLimit int64      `json:"trafficLimit"`
 	ResetPeriod  string     `json:"resetPeriod"`
 	ExpireAt     *time.Time `json:"expireAt"`
+	AmneziaKey   string     `json:"amneziaKey"`
 }
 
 func (s *server) toUserDTO(u store.User) userDTO {
@@ -40,7 +42,7 @@ func (s *server) toUserDTO(u store.User) userDTO {
 		ID: u.ID, Name: u.Name, Note: u.Note, Enabled: u.Enabled,
 		Status:       string(service.StatusOf(u, s.Users.Now())),
 		TrafficLimit: u.TrafficLimit, TrafficUsed: u.TrafficUsed, ResetPeriod: u.ResetPeriod,
-		ExpireAt: u.ExpireAt, SubToken: u.SubToken, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
+		ExpireAt: u.ExpireAt, SubToken: u.SubToken, AmneziaKey: u.AmneziaKey, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
 	}
 }
 
@@ -48,7 +50,7 @@ func (in userInputDTO) toInput() service.UserInput {
 	enabled := in.Enabled == nil || *in.Enabled
 	return service.UserInput{
 		Name: in.Name, Note: in.Note, Enabled: enabled,
-		TrafficLimit: in.TrafficLimit, ResetPeriod: in.ResetPeriod, ExpireAt: in.ExpireAt,
+		TrafficLimit: in.TrafficLimit, ResetPeriod: in.ResetPeriod, ExpireAt: in.ExpireAt, AmneziaKey: in.AmneziaKey,
 	}
 }
 

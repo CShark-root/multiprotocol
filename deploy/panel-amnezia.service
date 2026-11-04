@@ -1,0 +1,41 @@
+[Unit]
+Description=panel - read-only view of the Amnezia containers
+After=docker.service
+# The panel works without it; it only feeds the Amnezia tab.
+
+[Service]
+# Docker's socket is root-only (root-equivalent), so this small helper runs
+# as root instead of giving the panel user Docker access. It answers two
+# fixed read-only questions over /run/panel-amnezia/helper.sock (group
+# panel): container status and container logs. It never starts, stops,
+# changes or removes anything.
+ExecStart=/usr/local/bin/panel amnezia-helper
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=panel-amnezia
+RuntimeDirectoryMode=0750
+Group=panel
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_CHOWN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+LockPersonality=true
+SystemCallArchitectures=native
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

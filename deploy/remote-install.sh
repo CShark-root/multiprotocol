@@ -18,6 +18,7 @@ id panel &>/dev/null || useradd --system --home-dir /var/lib/panel --shell /usr/
 
 install -m 0755 "$SRC/panel-linux-amd64" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
+install -m 0644 "$SRC/panel-amnezia.service" /etc/systemd/system/panel-amnezia.service
 [[ -x /usr/local/lib/panel/xray/xray ]] || bash "$SRC/install-xray.sh"
 [[ -x /usr/local/lib/panel/hysteria/hysteria ]] || bash "$SRC/install-hysteria.sh"
 [[ -x /usr/local/lib/panel/sing-box/sing-box ]] || bash "$SRC/install-singbox.sh"
@@ -48,7 +49,9 @@ RULES
 fi
 
 systemctl daemon-reload
-systemctl enable panel >/dev/null 2>&1
+systemctl enable panel panel-amnezia >/dev/null 2>&1
+# The Amnezia tab helper only reads Docker; Docker itself is left alone.
+systemctl restart panel-amnezia
 systemctl restart panel
 sleep 2
 # Optional: the address clients use, when auto-detection would pick the wrong one.
