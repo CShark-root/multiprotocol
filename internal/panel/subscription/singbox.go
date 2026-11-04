@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"panel/internal/panel/compile"
+	"panel/internal/panel/routing"
 	"panel/internal/panel/store"
 )
 
@@ -22,7 +23,7 @@ import (
 // with newer versions and drop this when they interoperate again.
 const singboxRealityWorks = false
 
-func SingBoxConfig(inbounds []store.Inbound, u store.User, host string) ([]byte, error) {
+func SingBoxConfig(inbounds []store.Inbound, u store.User, host, client string) ([]byte, error) {
 	var outbounds []any
 	var tags []string
 	for _, ib := range inbounds {
@@ -71,6 +72,7 @@ func SingBoxConfig(inbounds []store.Inbound, u store.User, host string) ([]byte,
 			},
 		},
 	}
+	clientRouting(cfg, client)
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
@@ -163,4 +165,48 @@ func singboxOutbounds(ib store.Inbound, u store.User, host string) []map[string]
 		return nil
 	}
 	return []map[string]any{o}
+}
+
+// Rule sets the device downloads itself (runetfreedom, updated daily).
+const ruleSetBase = "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/"
+
+func ruleSet(tag, path string) map[string]any {
+	return map[string]any{
+		"type": "remote", "tag": tag, "format": "binary", "url": ruleSetBase + path,
+		// Through the VPN: GitHub may be unreachable directly.
+		"download_detour": "proxy", "update_interval": "1d",
+	}
+}
+
+// clientRouting adds the device-side split chosen in the panel: Russian
+// sites direct (banks and services that dislike foreign IPs keep working),
+// or only blocked sites through the VPN.
+func clientRouting(cfg map[string]any, mode string) {
+	route := cfg["route"].(map[string]any)
+	rules := route["rules"].([]any)
+	dns := cfg["dns"].(map[string]any)
+	switch mode {
+	case routing.ClientRuDirect:
+		route["rule_set"] = []any{
+			ruleSet("geosite-category-ru", "rule-set-geosite/geosite-category-ru.srs"),
+			ruleSet("geoip-ru", "rule-set-geoip/geoip-ru.srs"),
+		}
+		route["rules"] = append(rules,
+			map[string]any{"domain_suffix": []string{"ru", "xn--p1ai", "su"}, "outbound": "direct"},
+			map[string]any{"rule_set": []string{"geosite-category-ru", "geoip-ru"}, "outbound": "direct"},
+		)
+		dns["rules"] = []any{
+			map[string]any{"domain_suffix": []string{"ru", "xn--p1ai", "su"}, "server": "dns-local"},
+			map[string]any{"rule_set": []string{"geosite-category-ru"}, "server": "dns-local"},
+		}
+	case routing.ClientBlockedOnly:
+		route["rule_set"] = []any{
+			ruleSet("geosite-ru-blocked", "rule-set-geosite/geosite-ru-blocked.srs"),
+			ruleSet("geoip-ru-blocked", "rule-set-geoip/geoip-ru-blocked.srs"),
+		}
+		route["rules"] = append(rules, map[string]any{"rule_set": []string{"geosite-ru-blocked", "geoip-ru-blocked"}, "outbound": "proxy"})
+		route["final"] = "direct"
+		dns["rules"] = []any{map[string]any{"rule_set": []string{"geosite-ru-blocked"}, "server": "dns-remote"}}
+		dns["final"] = "dns-local"
+	}
 }

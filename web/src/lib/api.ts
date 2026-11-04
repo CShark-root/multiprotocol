@@ -122,6 +122,7 @@ export type RoutingSettings = {
   geo: { source: 'loyalsoldier' | 'runetfreedom' | 'custom'; geoipUrl: string; geositeUrl: string; autoUpdate: boolean }
   services: string[]
   outbounds: CustomOut[]
+  client: 'all' | 'ru-direct' | 'blocked-only'
   geoState: { lastCheck: string; lastUpdate: string; lastError: string; lastSource: string; files: { name: string; size: number; modified: string }[] }
 }
 export type Trace = { ip: string; country: string; warp: string; latencyMs: number }
@@ -412,6 +413,7 @@ export const api = {
         warp: { mode: s.warp.mode },
         dns: s.dns,
         geo: s.geo,
+        client: s.client,
         outbounds: s.outbounds.map(({ id, name, link }) => ({ id, name, link: link ?? '' })),
       }),
     registerWarp: () => request<RoutingSettings>('POST', 'routing/warp', {}),

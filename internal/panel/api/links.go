@@ -9,6 +9,7 @@ import (
 	"panel/internal/panel/config"
 	"panel/internal/panel/service"
 	"panel/internal/panel/stealth"
+	"panel/internal/panel/routing"
 	"panel/internal/panel/store"
 	"panel/internal/panel/subscription"
 )
@@ -110,7 +111,9 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 		h.Set("Subscription-Userinfo", subscription.UserInfo(u))
 		h.Set("Profile-Update-Interval", strconv.Itoa(int(subscription.UpdateInterval.Hours())))
 		if wantsSingBox(r) {
-			body, err := subscription.SingBoxConfig(inbounds, u, d.PublicHost)
+			rs := routing.Defaults()
+			d.Store.GetSetting(r.Context(), "routing", &rs)
+			body, err := subscription.SingBoxConfig(inbounds, u, d.PublicHost, rs.Client)
 			if err != nil {
 				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 				return

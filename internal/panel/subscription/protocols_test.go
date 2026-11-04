@@ -62,7 +62,7 @@ func TestSingBoxClientConfig(t *testing.T) {
 		{Remark: "Vision", Protocol: "vless", Transport: "tcp", Port: 8443, Enabled: true, Settings: store.InboundSettings{Reality: reality()}},
 		{Remark: "STLS", Protocol: "shadowtls", Transport: "tcp", Port: 9443, Enabled: true, Settings: store.InboundSettings{ShadowTLS: &store.ShadowTLSSettings{Handshake: "www.microsoft.com:443"}, Shadowsocks: ssS}},
 	}
-	b, err := SingBoxConfig(inbounds, user, "203.0.113.5")
+	b, err := SingBoxConfig(inbounds, user, "203.0.113.5", "")
 	if err != nil {
 		t.Fatal(err)
 	}

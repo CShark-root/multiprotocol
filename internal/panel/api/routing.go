@@ -46,6 +46,7 @@ type routingDTO struct {
 	Geo       routing.GeoSettings `json:"geo"`
 	Services  []string            `json:"services"`
 	Outbounds []outDTO            `json:"outbounds"`
+	Client    string              `json:"client"`
 	GeoState  struct {
 		service.GeoStatus
 		Files []geo.Info `json:"files"`
@@ -59,8 +60,9 @@ type routingInput struct {
 	WARP    struct {
 		Mode string `json:"mode"`
 	} `json:"warp"`
-	DNS routing.DNSSettings `json:"dns"`
-	Geo routing.GeoSettings `json:"geo"`
+	DNS    routing.DNSSettings `json:"dns"`
+	Geo    routing.GeoSettings `json:"geo"`
+	Client string              `json:"client"`
 	// Exits: existing ones by id (their link stays on the server), new ones
 	// with a link and no id.
 	Outbounds []struct {
@@ -83,6 +85,7 @@ func (s *server) toRoutingDTO(r *http.Request, st routing.Settings) routingDTO {
 	for _, sv := range routing.Services {
 		d.Services = append(d.Services, sv.Key)
 	}
+	d.Client = st.Client
 	d.Outbounds = []outDTO{}
 	for _, o := range st.Outbounds {
 		summary := ""
@@ -115,6 +118,7 @@ func (s *server) saveRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	st := routing.Settings{Presets: in.Presets, Rules: in.Rules, DNS: in.DNS, Geo: in.Geo}
 	st.WARP.Mode = in.WARP.Mode
+	st.Client = in.Client
 	for _, o := range in.Outbounds {
 		st.Outbounds = append(st.Outbounds, routing.CustomOutbound{ID: o.ID, Name: o.Name, Link: o.Link})
 	}

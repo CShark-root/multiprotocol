@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Smartphone,
   Waypoints,
   Trash2,
 } from 'lucide-react'
@@ -128,6 +129,7 @@ export function RoutingPage() {
             </div>
           </Section>
           <CountriesCard s={s} edit={edit} />
+          <ClientCard s={s} edit={edit} />
           <WarpCard s={s} edit={edit} onServer={accept} />
         </div>
         <div className="space-y-4">
@@ -968,6 +970,30 @@ function OutboundsCard({ s, edit }: CardProps) {
         </div>
       )}
       {s.outbounds.length > 0 && <p className="mt-3 text-xs text-muted-foreground">{t('routing.outsUseHint')}</p>}
+    </Section>
+  )
+}
+
+function ClientCard({ s, edit }: CardProps) {
+  const { t } = useTranslation()
+  const modes = ['all', 'ru-direct', 'blocked-only'] as const
+  return (
+    <Section icon={<Smartphone className="h-5 w-5" />} title={t('routing.client')} hint={t('routing.clientHint')}>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {modes.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => edit((d) => (d.client = m))}
+            aria-pressed={(s.client || 'all') === m}
+            className={'rounded-xl border p-3 text-left transition ' + ((s.client || 'all') === m ? 'border-primary bg-accent' : 'hover:bg-muted/60')}
+          >
+            <div className="text-sm font-medium">{t(`routing.clientModes.${m}`)}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t(`routing.clientModes.${m}Hint`)}</div>
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">{t('routing.clientNote')}</p>
     </Section>
   )
 }

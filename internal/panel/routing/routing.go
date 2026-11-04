@@ -211,7 +211,17 @@ type Settings struct {
 	Bridge  Bridge       `json:"bridge"`
 	// Outbounds are the admin's own exits (another server, a proxy).
 	Outbounds []CustomOutbound `json:"outbounds"`
+	// Client is the routing put into sing-box subscriptions (what the
+	// device itself sends through the VPN): ClientAll, ClientRuDirect or
+	// ClientBlockedOnly.
+	Client string `json:"client"`
 }
+
+const (
+	ClientAll         = "all"
+	ClientRuDirect    = "ru-direct"
+	ClientBlockedOnly = "blocked-only"
+)
 
 // CustomOutbound is an exit given as a share link. Rules send traffic to
 // it as "out:<ID>". Hysteria and sing-box reach it through its own
@@ -400,6 +410,13 @@ func Normalize(s Settings, userExists func(int64) bool) (Settings, error) {
 		if !slices.ContainsFunc(Services, func(sv Service) bool { return sv.Key == k }) {
 			return s, validate.Fail("presets.warpServices", "unknown service")
 		}
+	}
+	switch s.Client {
+	case ClientAll, ClientRuDirect, ClientBlockedOnly:
+	case "":
+		s.Client = ClientAll
+	default:
+		return s, validate.Fail("client", "all, ru-direct or blocked-only")
 	}
 	if s.Presets.Countries == nil {
 		s.Presets.Countries = []CountryRule{}

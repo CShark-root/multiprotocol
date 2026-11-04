@@ -492,6 +492,18 @@ export const ru = {
     },
     dnsStrategy: 'IPv4 / IPv6',
     dnsStrategies: { prefer4: 'Предпочитать IPv4', ipv4: 'Только IPv4', both: 'IPv4 и IPv6' },
+    client: 'На устройствах',
+    clientHint: 'Что телефон сам отправляет через VPN, а что открывает напрямую. Передаётся в подписке sing-box.',
+    clientModes: {
+      all: 'Всё через VPN',
+      allHint: 'Кроме локальной сети',
+      'ru-direct': 'Российское напрямую',
+      'ru-directHint': 'Сайты и IP России мимо VPN — банки и госуслуги не ругаются',
+      'blocked-only': 'Только заблокированное',
+      'blocked-onlyHint': 'Через VPN лишь то, что заблокировано в РФ',
+    },
+    clientNote: 'Работает в Hiddify, sing-box и NekoBox (подписка sing-box). В v2rayNG, Happ и V2Box настраивается в самом приложении. Списки (runetfreedom) телефон скачивает и обновляет сам.',
+
     outs: 'Свои выходы',
     outsHint: 'Другой сервер или прокси, куда можно отправить часть трафика правилом: каскад, резидентный IP, сервер в нужной стране.',
     outsAdd: 'Выход',
