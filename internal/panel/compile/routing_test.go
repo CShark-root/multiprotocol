@@ -264,3 +264,16 @@ func TestCountriesAndMissingCategories(t *testing.T) {
 		t.Error("accepted a bad country code")
 	}
 }
+
+func TestWarpBridgeWithoutRules(t *testing.T) {
+	// WARP just registered, nothing routed through it yet: the bridge must
+	// still be there so the panel's WARP check works.
+	rt := testRouting(t, func(s *routing.Settings) {
+		s.Rules = nil
+		s.Presets.WarpServices = nil
+	})
+	cfg, _ := Xray(nil, nil, "127.0.0.1:1", rt)
+	if cfg == nil || !strings.Contains(string(cfg), `"warp-bridge"`) || !strings.Contains(string(cfg), `"wireguard"`) {
+		t.Fatalf("no bridge:\n%s", cfg)
+	}
+}

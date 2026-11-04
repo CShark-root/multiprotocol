@@ -47,7 +47,9 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 			ins = append(ins, xrayInbound(ib, users))
 		}
 	}
-	bridge := rt.usesWarp() && rt.Bridge.Port > 0
+	// The bridge runs whenever WARP is registered and on, even before any rule
+	// uses it: the WARP check goes through it.
+	bridge := rt.Warp != nil && rt.Bridge.Port > 0
 	if len(ins) == 0 && !bridge {
 		return nil, nil
 	}
