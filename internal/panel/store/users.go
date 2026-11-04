@@ -56,6 +56,11 @@ func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
 	return u, notFound(err)
 }
 
+func (s *Store) GetUserByName(ctx context.Context, name string) (User, error) {
+	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE name = ?`, name))
+	return u, notFound(err)
+}
+
 func (s *Store) GetUserBySubToken(ctx context.Context, token string) (User, error) {
 	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE sub_token = ?`, token))
 	return u, notFound(err)

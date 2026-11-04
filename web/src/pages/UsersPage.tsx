@@ -6,6 +6,7 @@ import { ApiError, api, type ResetPeriod, type User, type UserInput, type UserSt
 import { GiB, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
 import { ShareRow } from '@/components/share'
+import { useKindLabel } from './InboundsPage'
 
 const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'> = {
   active: 'success',
@@ -164,6 +165,7 @@ export function UsersPage() {
 
 function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const { t } = useTranslation()
+  const kindLabel = useKindLabel()
   const links = useQuery({ queryKey: ['users', user.id, 'links'], queryFn: () => api.users.links(user.id) })
   return (
     <Dialog open onClose={onClose} title={t('connect.title', { name: user.name })}>
@@ -177,6 +179,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
             <p className="rounded-xl bg-warning-soft px-3.5 py-2.5 text-sm text-warning">{t('connect.disabledUser')}</p>
           )}
           <ShareRow label={t('connect.subscription')} hint={t('connect.subscriptionHint')} text={links.data.subscriptionUrl} />
+          <ShareRow label={t('connect.singbox')} hint={t('connect.singboxHint')} text={links.data.singboxUrl} />
           <div>
             <div className="text-sm font-medium">{t('connect.links')}</div>
             <p className="mb-2 text-xs text-muted-foreground">{t('connect.linksHint')}</p>
@@ -185,8 +188,19 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
             ) : (
               <div className="space-y-2">
                 {links.data.links.map((l) => {
-                  const kind = t(`inbounds.transports.${l.transport}.title`)
-                  return <ShareRow key={l.inboundId} label={l.remark === kind ? kind : `${l.remark} · ${kind}`} text={l.url} />
+                  // The remark defaults to the kind; show the kind only when the
+                  // admin named the inbound something else entirely.
+                  const kind = kindLabel(l.protocol, l.transport)
+                  const named = l.remark.toLowerCase().includes(t(`inbounds.protocols.${l.protocol}.title`).split(' ')[0].toLowerCase())
+                  const label = named ? l.remark : `${l.remark} · ${kind}`
+                  return l.url ? (
+                    <ShareRow key={l.inboundId} label={label} text={l.url} />
+                  ) : (
+                    <div key={l.inboundId} className="rounded-xl border border-dashed p-3.5">
+                      <div className="text-sm font-medium">{label}</div>
+                      <p className="mt-1 text-xs text-muted-foreground">{t('connect.onlySingbox')}</p>
+                    </div>
+                  )
                 })}
               </div>
             )}

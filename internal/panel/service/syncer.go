@@ -125,5 +125,11 @@ func (s *Syncer) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{"xray": xrayCfg, "hysteria": hyCfg}})
+	sbCfg, err := compile.SingBox(inbounds, active)
+	if err != nil {
+		return err
+	}
+	return s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{
+		"xray": xrayCfg, "hysteria": hyCfg, "singbox": sbCfg,
+	}})
 }

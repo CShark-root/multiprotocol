@@ -242,6 +242,74 @@ func TestAuthAndUsersFlow(t *testing.T) {
 	c.expect(200, "GET", "/api/system", nil)
 }
 
+func TestTestKit(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+
+	kit := c.expect(201, "POST", "/api/inbounds/test-kit", map[string]any{})
+	if kit["inbounds"].(float64) != 11 {
+		t.Fatalf("test kit: %v", kit)
+	}
+	c.expect(409, "POST", "/api/inbounds/test-kit", map[string]any{})
+
+	code, body := c.json("GET", "/api/inbounds", nil)
+	var list []map[string]any
+	json.Unmarshal(body, &list)
+	if code != 200 || len(list) != 11 {
+		t.Fatalf("inbounds after test kit: %d %d", code, len(list))
+	}
+	ports := map[string]bool{}
+	for _, ib := range list {
+		key := ib["network"].(string) + "/" + itoa(int(ib["port"].(float64)))
+		if ports[key] {
+			t.Fatalf("port collision %s", key)
+		}
+		ports[key] = true
+	}
+
+	code, body = c.json("GET", "/api/users", nil)
+	var users []map[string]any
+	json.Unmarshal(body, &users)
+	if code != 200 || len(users) != 1 || users[0]["name"] != "test-kit" {
+		t.Fatalf("test-kit user: %s", body)
+	}
+	links := c.expect(200, "GET", "/api/users/"+itoa(int(users[0]["id"].(float64)))+"/links", nil)
+	withURL := 0
+	for _, l := range links["links"].([]any) {
+		if l.(map[string]any)["url"] != "" {
+			withURL++
+		}
+	}
+	if withURL != 10 { // all but ShadowTLS
+		t.Fatalf("links with a share URL: %d", withURL)
+	}
+
+	if !strings.HasSuffix(links["singboxUrl"].(string), "?format=singbox") {
+		t.Fatalf("singboxUrl: %v", links["singboxUrl"])
+	}
+	// SubBaseURL points at the public address; fetch through the test server.
+	token := links["subscriptionUrl"].(string)
+	token = token[strings.LastIndex(token, "/")+1:]
+	resp, err := http.Get(c.server + "/" + subPath + "/" + token + "?format=singbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb map[string]any
+	err = json.NewDecoder(resp.Body).Decode(&sb)
+	resp.Body.Close()
+	if err != nil || resp.Header.Get("Content-Type") != "application/json; charset=utf-8" || sb["outbounds"] == nil {
+		t.Fatalf("sing-box subscription: %v %v", err, sb)
+	}
+
+	del := c.expect(200, "DELETE", "/api/inbounds/test-kit", nil)
+	if del["inbounds"].(float64) != 11 {
+		t.Fatalf("delete test kit: %v", del)
+	}
+	if code, body := c.json("GET", "/api/users", nil); code != 200 || string(body) != "[]\n" {
+		t.Fatalf("test-kit user must be removed: %s", body)
+	}
+}
+
 func TestWritesRequireJSON(t *testing.T) {
 	c := newClient(t)
 	if code, _ := c.do("POST", "/api/auth/setup", "application/x-www-form-urlencoded", nil); code != 415 {

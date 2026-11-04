@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Installs or updates the panel on a Linux server from files copied into
-# $1 (default /tmp): panel-linux-amd64, panel.service, install-xray.sh,
-# install-hysteria.sh.
+# $1 (default /tmp): panel-linux-amd64, panel.service and the
+# install-{xray,hysteria,singbox}.sh scripts.
 # Used by scripts/vm/deploy.ps1; the future one-line installer reuses it.
 set -euo pipefail
 SRC="${1:-/tmp}"
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo bash $0" >&2; exit 1; }
 
-for cmd in curl unzip; do
+for cmd in curl unzip python3; do
   if ! command -v "$cmd" >/dev/null; then
-    apt-get update -qq && apt-get install -y -qq curl unzip
+    apt-get update -qq && apt-get install -y -qq curl unzip python3
     break
   fi
 done
@@ -20,6 +20,7 @@ install -m 0755 "$SRC/panel-linux-amd64" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 [[ -x /usr/local/lib/panel/xray/xray ]] || bash "$SRC/install-xray.sh"
 [[ -x /usr/local/lib/panel/hysteria/hysteria ]] || bash "$SRC/install-hysteria.sh"
+[[ -x /usr/local/lib/panel/sing-box/sing-box ]] || bash "$SRC/install-singbox.sh"
 
 systemctl daemon-reload
 systemctl enable panel >/dev/null 2>&1

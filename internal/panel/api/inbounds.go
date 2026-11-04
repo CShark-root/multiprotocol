@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"panel/internal/panel/service"
@@ -16,7 +18,9 @@ type inboundDTO struct {
 	Protocol  string    `json:"protocol"`
 	Transport string    `json:"transport"`
 	Security  string    `json:"security"`
-	Network   string    `json:"network"` // tcp | udp
+	Network   string    `json:"network"` // tcp | udp | tcp+udp
+	Core      string    `json:"core"`    // xray | hysteria | singbox
+	TestKit   bool      `json:"testKit"`
 	Port      int       `json:"port"`
 	Address   string    `json:"address"`
 	Enabled   bool      `json:"enabled"`
@@ -31,8 +35,9 @@ type inboundDTO struct {
 	XHTTPPath       string `json:"xhttpPath,omitempty"`
 	XHTTPMode       string `json:"xhttpMode,omitempty"`
 	GRPCServiceName string `json:"grpcServiceName,omitempty"`
+	WSPath          string `json:"wsPath,omitempty"`
 
-	// Hysteria2
+	// Hysteria2 (CertPin also for TUIC and AnyTLS)
 	Obfs       bool   `json:"obfs"`
 	Masquerade string `json:"masquerade,omitempty"`
 	UpMbps     int    `json:"upMbps,omitempty"`
@@ -52,6 +57,7 @@ type inboundInputDTO struct {
 	XHTTPPath       string `json:"xhttpPath"`
 	XHTTPMode       string `json:"xhttpMode"`
 	GRPCServiceName string `json:"grpcServiceName"`
+	WSPath          string `json:"wsPath"`
 	Obfs            bool   `json:"obfs"`
 	Masquerade      string `json:"masquerade"`
 	UpMbps          int    `json:"upMbps"`
@@ -60,10 +66,11 @@ type inboundInputDTO struct {
 }
 
 func toInboundDTO(ib store.Inbound) inboundDTO {
+	spec, _ := service.Spec(ib.Protocol)
 	d := inboundDTO{
 		ID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
-		Network: service.Network(ib.Protocol), Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled,
-		CreatedAt: ib.CreatedAt,
+		Network: strings.Join(spec.Networks, "+"), Core: spec.Core, TestKit: ib.TestKit,
+		Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled, CreatedAt: ib.CreatedAt,
 	}
 	if r := ib.Settings.Reality; r != nil {
 		d.Target, d.Fingerprint, d.PublicKey = r.Target, r.Fingerprint, r.PublicKey
@@ -84,6 +91,15 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 		d.ServerName, d.Masquerade, d.UpMbps, d.DownMbps = h.SNI, h.Masquerade, h.UpMbps, h.DownMbps
 		d.Obfs, d.CertPin = h.ObfsPassword != "", h.PinSHA256
 	}
+	if t := ib.Settings.TLS; t != nil {
+		d.ServerName, d.CertPin = t.SNI, t.PinSHA256
+	}
+	if ws := ib.Settings.WS; ws != nil {
+		d.WSPath = ws.Path
+	}
+	if st := ib.Settings.ShadowTLS; st != nil {
+		d.Target = st.Handshake
+	}
 	return d
 }
 
@@ -92,7 +108,7 @@ func (in inboundInputDTO) toInput() service.InboundInput {
 		Remark: in.Remark, Protocol: in.Protocol, Port: in.Port, Address: in.Address,
 		Enabled:   in.Enabled == nil || *in.Enabled,
 		Transport: in.Transport, Target: in.Target, ServerName: in.ServerName, Fingerprint: in.Fingerprint,
-		XHTTPPath: in.XHTTPPath, XHTTPMode: in.XHTTPMode, GRPCServiceName: in.GRPCServiceName,
+		XHTTPPath: in.XHTTPPath, XHTTPMode: in.XHTTPMode, GRPCServiceName: in.GRPCServiceName, WSPath: in.WSPath,
 		Obfs: in.Obfs, Masquerade: in.Masquerade, UpMbps: in.UpMbps, DownMbps: in.DownMbps,
 	}
 }
@@ -177,13 +193,35 @@ var masqueradeSites = []string{
 	"https://www.bing.com/", "https://www.cloudflare.com/", "https://www.google.com/", "https://www.youtube.com/",
 }
 
+func (s *server) createTestKit(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Inbounds.CreateTestKit(r.Context(), adminFrom(r.Context()).ID)
+	if errors.Is(err, service.ErrTestKitExists) {
+		writeError(w, http.StatusConflict, "test_kit_exists", err.Error())
+		return
+	}
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]int{"inbounds": len(list)})
+}
+
+func (s *server) deleteTestKit(w http.ResponseWriter, r *http.Request) {
+	n, err := s.Inbounds.DeleteTestKit(r.Context(), adminFrom(r.Context()).ID)
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"inbounds": n})
+}
+
 func (s *server) suggestInbound(w http.ResponseWriter, r *http.Request) {
-	network := r.URL.Query().Get("network")
-	if network != "udp" {
-		network = "tcp"
+	networks := service.Networks(r.URL.Query().Get("protocol"))
+	if networks == nil {
+		networks = []string{"tcp"}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"port":         s.Inbounds.SuggestPort(r.Context(), network),
+		"port":         s.Inbounds.SuggestPort(r.Context(), networks...),
 		"targets":      realityTargets,
 		"masquerades":  masqueradeSites,
 		"fingerprints": service.Fingerprints,

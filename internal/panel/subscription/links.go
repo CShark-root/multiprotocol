@@ -1,9 +1,10 @@
 // Package subscription builds client share links and the subscription
-// response served at /<subPath>/<token>.
+// responses served at /<subPath>/<token>.
 package subscription
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -11,17 +12,24 @@ import (
 	"strings"
 	"time"
 
+	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
 )
 
-// VLESSLink returns a vless:// URI understood by v2rayNG, v2rayN, Hiddify,
-// Streisand and other Xray-based clients.
-func VLESSLink(ib store.Inbound, u store.User, host string) string {
+func endpoint(ib store.Inbound, host string) string {
 	if ib.Address != "" {
 		host = ib.Address
 	}
+	return net.JoinHostPort(host, strconv.Itoa(ib.Port))
+}
+
+func fragment(ib store.Inbound, u store.User) string {
+	return url.PathEscape(ib.Remark + " · " + u.Name)
+}
+
+// realityQuery holds the parameters VLESS and Trojan links share.
+func realityQuery(ib store.Inbound) url.Values {
 	q := url.Values{}
-	q.Set("encryption", "none")
 	q.Set("security", "reality")
 	r := ib.Settings.Reality
 	if len(r.ServerNames) > 0 {
@@ -43,20 +51,51 @@ func VLESSLink(ib store.Inbound, u store.User, host string) string {
 		q.Set("mode", "gun")
 	default:
 		q.Set("type", "tcp")
-		q.Set("flow", "xtls-rprx-vision")
 	}
-	return fmt.Sprintf("vless://%s@%s?%s#%s",
-		u.UUID, net.JoinHostPort(host, strconv.Itoa(ib.Port)), q.Encode(), url.PathEscape(ib.Remark+" · "+u.Name))
+	return q
 }
 
-// Hysteria2Link returns a hysteria2:// URI (official URI scheme, also read
-// by v2rayNG, Hiddify, NekoBox and sing-box based clients). The certificate
-// is self-signed, so the link pins it and sets insecure=1 for clients that
-// cannot pin.
-func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
-	if ib.Address != "" {
-		host = ib.Address
+// VLESSLink returns a vless:// URI understood by v2rayNG, v2rayN, Hiddify,
+// Streisand and other Xray-based clients.
+func VLESSLink(ib store.Inbound, u store.User, host string) string {
+	q := realityQuery(ib)
+	q.Set("encryption", "none")
+	if ib.Transport == "tcp" {
+		q.Set("flow", "xtls-rprx-vision")
 	}
+	return fmt.Sprintf("vless://%s@%s?%s#%s", u.UUID, endpoint(ib, host), q.Encode(), fragment(ib, u))
+}
+
+func TrojanLink(ib store.Inbound, u store.User, host string) string {
+	return fmt.Sprintf("trojan://%s@%s?%s#%s", url.PathEscape(u.UUID), endpoint(ib, host), realityQuery(ib).Encode(), fragment(ib, u))
+}
+
+// VMessLink uses the de-facto v2rayN base64 JSON format.
+func VMessLink(ib store.Inbound, u store.User, host string) string {
+	h, port, _ := net.SplitHostPort(endpoint(ib, host))
+	v := map[string]string{
+		"v": "2", "ps": ib.Remark + " · " + u.Name, "add": h, "port": port, "id": u.UUID,
+		"aid": "0", "scy": "auto", "net": "tcp", "type": "none", "host": "", "path": "", "tls": "",
+	}
+	if ib.Transport == "ws" && ib.Settings.WS != nil {
+		v["net"], v["path"] = "ws", ib.Settings.WS.Path
+	}
+	b, _ := json.Marshal(v)
+	return "vmess://" + base64.StdEncoding.EncodeToString(b)
+}
+
+// ShadowsocksLink follows SIP002 for 2022 ciphers: the user info is
+// percent-encoded "method:serverPSK:userKey", not base64.
+func ShadowsocksLink(ib store.Inbound, u store.User, host string) string {
+	ss := ib.Settings.Shadowsocks
+	userinfo := url.UserPassword(ss.Method, ss.ServerPSK+":"+compile.SSUserKey(u.UUID))
+	return fmt.Sprintf("ss://%s@%s#%s", userinfo.String(), endpoint(ib, host), fragment(ib, u))
+}
+
+// Hysteria2Link returns a hysteria2:// URI (official scheme). The
+// certificate is self-signed, so the link pins it and sets insecure=1 for
+// clients that cannot pin.
+func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
 	h := ib.Settings.Hysteria
 	q := url.Values{}
 	q.Set("sni", h.SNI)
@@ -66,23 +105,50 @@ func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
 		q.Set("obfs", "salamander")
 		q.Set("obfs-password", h.ObfsPassword)
 	}
-	return fmt.Sprintf("hysteria2://%s@%s/?%s#%s",
-		url.PathEscape(u.UUID), net.JoinHostPort(host, strconv.Itoa(ib.Port)), q.Encode(), url.PathEscape(ib.Remark+" · "+u.Name))
+	return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", url.PathEscape(u.UUID), endpoint(ib, host), q.Encode(), fragment(ib, u))
 }
 
-// Link returns the share link for any supported inbound, or "" if the
-// inbound has no client link.
+func TUICLink(ib store.Inbound, u store.User, host string) string {
+	q := url.Values{}
+	q.Set("sni", ib.Settings.TLS.SNI)
+	q.Set("alpn", "h3")
+	q.Set("congestion_control", "bbr")
+	q.Set("udp_relay_mode", "native")
+	q.Set("allow_insecure", "1")
+	return fmt.Sprintf("tuic://%s@%s?%s#%s", url.UserPassword(u.UUID, u.UUID).String(), endpoint(ib, host), q.Encode(), fragment(ib, u))
+}
+
+func AnyTLSLink(ib store.Inbound, u store.User, host string) string {
+	q := url.Values{}
+	q.Set("sni", ib.Settings.TLS.SNI)
+	q.Set("insecure", "1")
+	return fmt.Sprintf("anytls://%s@%s/?%s#%s", url.PathEscape(u.UUID), endpoint(ib, host), q.Encode(), fragment(ib, u))
+}
+
+// Link returns the share link for an inbound, or "" when the protocol has
+// no common share-link format (ShadowTLS: use the sing-box subscription).
 func Link(ib store.Inbound, u store.User, host string) string {
+	s := ib.Settings
 	switch {
-	case ib.Protocol == "vless" && ib.Settings.Reality != nil:
+	case ib.Protocol == "vless" && s.Reality != nil:
 		return VLESSLink(ib, u, host)
-	case ib.Protocol == "hysteria2" && ib.Settings.Hysteria != nil:
+	case ib.Protocol == "trojan" && s.Reality != nil:
+		return TrojanLink(ib, u, host)
+	case ib.Protocol == "vmess":
+		return VMessLink(ib, u, host)
+	case ib.Protocol == "shadowsocks" && s.Shadowsocks != nil:
+		return ShadowsocksLink(ib, u, host)
+	case ib.Protocol == "hysteria2" && s.Hysteria != nil:
 		return Hysteria2Link(ib, u, host)
+	case ib.Protocol == "tuic" && s.TLS != nil:
+		return TUICLink(ib, u, host)
+	case ib.Protocol == "anytls" && s.TLS != nil:
+		return AnyTLSLink(ib, u, host)
 	}
 	return ""
 }
 
-// Links returns one link per enabled inbound.
+// Links returns one link per enabled inbound that has a link format.
 func Links(inbounds []store.Inbound, u store.User, host string) []string {
 	var out []string
 	for _, ib := range inbounds {

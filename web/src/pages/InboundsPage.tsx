@@ -1,18 +1,20 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Cable, CheckCircle2, ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
-import { ApiError, api, protocolOf, type Inbound, type InboundInput, type Transport } from '@/lib/api'
+import { AlertTriangle, Cable, CheckCircle2, ChevronDown, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ApiError, api, protocolOrder, protocolSpecs, type Inbound, type InboundInput, type Protocol, type Transport } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
 
-const kinds: Transport[] = ['xhttp', 'tcp', 'grpc', 'quic']
-
-// Which core serves which protocol, and the install script for it.
+// Install scripts per core, for the "not installed" banner.
 const cores = {
-  vless: { name: 'xray', title: 'Xray', script: 'xray' },
-  hysteria2: { name: 'hysteria', title: 'Hysteria', script: 'hysteria' },
+  xray: { title: 'Xray', script: 'xray' },
+  hysteria: { title: 'Hysteria', script: 'hysteria' },
+  singbox: { title: 'sing-box', script: 'singbox' },
 } as const
+
+const realityProtocols: Protocol[] = ['vless', 'trojan']
+const certProtocols: Protocol[] = ['tuic', 'anytls']
 
 function CoreBanners({ inbounds }: { inbounds: Inbound[] }) {
   const { t } = useTranslation()
@@ -20,30 +22,28 @@ function CoreBanners({ inbounds }: { inbounds: Inbound[] }) {
   if (!system.data) return null
   if (!system.data.localAgent) return <Banner tone="warning" title={t('inbounds.banner.noAgent')} />
 
-  const used = [...new Set(inbounds.filter((i) => i.enabled).map((i) => i.protocol))]
+  const used = [...new Set(inbounds.filter((i) => i.enabled).map((i) => i.core))]
   return (
     <>
-      {used.map((p) => {
-        const c = cores[p]
-        const h = system.data.localAgent?.cores.find((x) => x.name === c.name)
+      {used.map((name) => {
+        const c = cores[name]
+        const h = system.data.localAgent?.cores.find((x) => x.name === name)
         if (!h) return null
         if (!h.installed) {
           return (
             <Banner
-              key={p}
+              key={name}
               tone="warning"
               title={t('inbounds.banner.notInstalled', { core: c.title })}
               text={t('inbounds.banner.notInstalledHint', { script: c.script })}
             />
           )
         }
-        if (h.message) return <Banner key={p} tone="danger" title={t('inbounds.banner.error', { core: c.title })} text={h.message} />
-        if (h.running) return <Banner key={p} tone="success" title={t('inbounds.banner.running', { core: c.title, version: h.version })} />
+        if (h.message) return <Banner key={name} tone="danger" title={t('inbounds.banner.error', { core: c.title })} text={h.message} />
+        if (h.running) return <Banner key={name} tone="success" title={t('inbounds.banner.running', { core: c.title, version: h.version })} />
         return null
       })}
-      {system.data.sync?.lastError && !used.length && (
-        <Banner tone="danger" title={t('common.error')} text={system.data.sync.lastError} />
-      )}
+      {system.data.sync?.lastError && !used.length && <Banner tone="danger" title={t('common.error')} text={system.data.sync.lastError} />}
     </>
   )
 }
@@ -66,15 +66,25 @@ function Banner({ tone, title, text }: { tone: 'success' | 'warning' | 'danger';
   )
 }
 
+/** "VLESS + Reality · XHTTP", transport only when the protocol has several. */
+export function useKindLabel() {
+  const { t } = useTranslation()
+  return (p: Protocol, tr: Transport) =>
+    protocolSpecs[p].transports.length > 1 ? `${t(`inbounds.protocols.${p}.title`)} · ${t(`inbounds.transportNames.${tr}`)}` : t(`inbounds.protocols.${p}.title`)
+}
+
 export function InboundsPage() {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const kindLabel = useKindLabel()
   const inbounds = useQuery({ queryKey: ['inbounds'], queryFn: api.inbounds.list })
   const [editing, setEditing] = useState<Inbound | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Inbound | null>(null)
+  const [removingKit, setRemovingKit] = useState(false)
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['inbounds'] })
+    qc.invalidateQueries({ queryKey: ['users'] })
     setTimeout(() => qc.invalidateQueries({ queryKey: ['system'] }), 1500)
   }
   const toggle = useMutation({
@@ -88,18 +98,41 @@ export function InboundsPage() {
       invalidate()
     },
   })
+  const createKit = useMutation({ mutationFn: api.inbounds.createTestKit, onSuccess: invalidate })
+  const deleteKit = useMutation({
+    mutationFn: api.inbounds.deleteTestKit,
+    onSuccess: () => {
+      setRemovingKit(false)
+      invalidate()
+    },
+  })
 
-  const addButton = (
-    <Button onClick={() => setEditing('new')}>
-      <Plus className="h-4 w-4" />
-      {t('inbounds.add')}
-    </Button>
+  const hasKit = inbounds.data?.some((i) => i.testKit) ?? false
+  const actions = (
+    <div className="flex flex-wrap gap-2">
+      {hasKit ? (
+        <Button variant="secondary" onClick={() => setRemovingKit(true)}>
+          <Trash2 className="h-4 w-4" />
+          {t('inbounds.testKitRemove')}
+        </Button>
+      ) : (
+        <Button variant="secondary" title={t('inbounds.testKitHint')} disabled={createKit.isPending} onClick={() => createKit.mutate()}>
+          <FlaskConical className="h-4 w-4" />
+          {t('inbounds.testKit')}
+        </Button>
+      )}
+      <Button onClick={() => setEditing('new')}>
+        <Plus className="h-4 w-4" />
+        {t('inbounds.add')}
+      </Button>
+    </div>
   )
 
   return (
     <>
-      <PageHeader title={t('inbounds.title')} subtitle={t('inbounds.subtitle')} actions={inbounds.data?.length ? addButton : undefined} />
+      <PageHeader title={t('inbounds.title')} subtitle={t('inbounds.subtitle')} actions={inbounds.data?.length ? actions : undefined} />
       {inbounds.data && <CoreBanners inbounds={inbounds.data} />}
+      {createKit.isError && <Banner tone="danger" title={t('common.error')} text={(createKit.error as Error).message} />}
 
       {inbounds.isPending ? (
         <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -107,35 +140,26 @@ export function InboundsPage() {
         <p className="text-sm text-destructive">{t('common.error')}</p>
       ) : inbounds.data.length === 0 ? (
         <Card>
-          <EmptyState icon={<Cable className="h-6 w-6" />} title={t('inbounds.emptyTitle')} text={t('inbounds.emptyText')} action={addButton} />
+          <EmptyState icon={<Cable className="h-6 w-6" />} title={t('inbounds.emptyTitle')} text={t('inbounds.emptyText')} action={actions} />
         </Card>
       ) : (
-        <div className="mt-1 grid gap-4 md:grid-cols-2">
+        <div className="mt-1 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {inbounds.data.map((ib) => (
             <Card key={ib.id} className={cn(!ib.enabled && 'opacity-70')}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{ib.remark}</div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Badge tone="accent">{t(`inbounds.transports.${ib.transport}.title`)}</Badge>
+                    <Badge tone="accent">{kindLabel(ib.protocol, ib.transport)}</Badge>
                     <Badge tone="muted">{t('inbounds.portLabel', { network: ib.network.toUpperCase(), port: ib.port })}</Badge>
                     {ib.obfs && <Badge tone="muted">salamander</Badge>}
+                    {ib.protocol === 'vmess' && <Badge tone="warning">{t('inbounds.weak')}</Badge>}
+                    {ib.testKit && <Badge tone="muted">{t('inbounds.testBadge')}</Badge>}
                   </div>
                 </div>
                 <Switch checked={ib.enabled} label={t('inbounds.enabled')} disabled={toggle.isPending} onChange={() => toggle.mutate(ib)} />
               </div>
-              <dl className="mt-4 space-y-1.5 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">{t(ib.protocol === 'hysteria2' ? 'inbounds.masquerade' : 'inbounds.target')}</dt>
-                  <dd className="truncate">{ib.protocol === 'hysteria2' ? ib.masquerade?.replace(/^https:\/\/|\/$/g, '') : ib.serverName}</dd>
-                </div>
-                {ib.address && (
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-muted-foreground">{t('inbounds.address')}</dt>
-                    <dd className="truncate">{ib.address}</dd>
-                  </div>
-                )}
-              </dl>
+              <InboundFacts ib={ib} />
               <div className="mt-4 flex justify-end gap-1">
                 <Button variant="ghost" size="sm" onClick={() => setEditing(ib)}>
                   <Pencil className="h-4 w-4" />
@@ -168,7 +192,39 @@ export function InboundsPage() {
           </Button>
         </div>
       </Dialog>
+
+      <Dialog open={removingKit} onClose={() => setRemovingKit(false)} title={t('inbounds.testKitRemove')} description={t('inbounds.testKitRemoveText')}>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setRemovingKit(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="danger" disabled={deleteKit.isPending} onClick={() => deleteKit.mutate()}>
+            {t('common.delete')}
+          </Button>
+        </div>
+      </Dialog>
     </>
+  )
+}
+
+function InboundFacts({ ib }: { ib: Inbound }) {
+  const { t } = useTranslation()
+  const facts: [string, string][] = []
+  if (realityProtocols.includes(ib.protocol)) facts.push([t('inbounds.target'), ib.serverName])
+  if (ib.protocol === 'hysteria2') facts.push([t('inbounds.masquerade'), ib.masquerade?.replace(/^https:\/\/|\/$/g, '') ?? ''])
+  if (certProtocols.includes(ib.protocol)) facts.push([t('inbounds.hySni'), ib.serverName])
+  if (ib.protocol === 'shadowtls') facts.push([t('inbounds.handshake'), ib.target?.replace(/:443$/, '') ?? ''])
+  if (ib.address) facts.push([t('inbounds.address'), ib.address])
+  if (!facts.length) return null
+  return (
+    <dl className="mt-4 space-y-1.5 text-sm">
+      {facts.map(([k, v]) => (
+        <div key={k} className="flex justify-between gap-4">
+          <dt className="text-muted-foreground">{k}</dt>
+          <dd className="truncate">{v}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -185,6 +241,7 @@ function toInput(ib: Inbound): InboundInput {
     xhttpPath: ib.xhttpPath ?? '',
     xhttpMode: ib.xhttpMode ?? 'auto',
     grpcServiceName: ib.grpcServiceName ?? '',
+    wsPath: ib.wsPath ?? '',
     obfs: ib.obfs,
     masquerade: ib.masquerade ?? '',
     upMbps: ib.upMbps ?? 0,
@@ -205,6 +262,7 @@ const emptyInput: InboundInput = {
   xhttpPath: '',
   xhttpMode: 'auto',
   grpcServiceName: '',
+  wsPath: '',
   obfs: false,
   masquerade: 'https://www.bing.com/',
   upMbps: 0,
@@ -214,14 +272,23 @@ const emptyInput: InboundInput = {
 
 function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
+  const kindLabel = useKindLabel()
   const [form, setForm] = useState<InboundInput>(inbound ? toInput(inbound) : emptyInput)
-  const isHy = form.protocol === 'hysteria2'
-  const network = isHy ? 'udp' : 'tcp'
-  const suggest = useQuery({ queryKey: ['inbounds', 'suggest', network], queryFn: () => api.inbounds.suggest(network), enabled: !inbound, staleTime: 0 })
+  const p = form.protocol
+  const spec = protocolSpecs[p]
+  const suggest = useQuery({ queryKey: ['inbounds', 'suggest', p], queryFn: () => api.inbounds.suggest(p), enabled: !inbound, staleTime: 0 })
   const [advanced, setAdvanced] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const set = <K extends keyof InboundInput>(k: K, v: InboundInput[K]) => setForm((f) => ({ ...f, [k]: v }))
-  const setKind = (k: Transport) => setForm((f) => ({ ...f, transport: k, protocol: protocolOf(k), port: 0, serverName: '' }))
+  const setProtocol = (np: Protocol) =>
+    setForm((f) => ({
+      ...f,
+      protocol: np,
+      transport: protocolSpecs[np].transports[0],
+      port: 0,
+      serverName: '',
+      target: 'www.microsoft.com',
+    }))
 
   const port = form.port || suggest.data?.port || 443
   const save = useMutation({
@@ -241,54 +308,93 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
   function submit(e: FormEvent) {
     e.preventDefault()
     setErrors({})
-    const remark = form.remark.trim() || t(`inbounds.transports.${form.transport}.title`)
-    save.mutate({ ...form, remark, port })
+    save.mutate({ ...form, remark: form.remark.trim() || kindLabel(p, form.transport), port })
   }
 
   const num = (v: string) => Number(v.replace(/\D/g, '')) || 0
+  const portHint = spec.network === 'udp' ? 'inbounds.udpPortHint' : spec.network === 'tcp+udp' ? 'inbounds.bothPortHint' : 'inbounds.portHint'
 
   return (
     <Dialog open onClose={onClose} title={inbound ? t('inbounds.editTitle', { name: inbound.remark }) : t('inbounds.createTitle')}>
       <form onSubmit={submit} className="max-h-[75vh] space-y-4 overflow-y-auto pr-1">
         {!inbound && (
           <div className="space-y-2">
-            <div className="text-sm font-medium">{t('inbounds.transport')}</div>
-            <div className="grid gap-2">
-              {kinds.map((k) => (
+            <div className="text-sm font-medium">{t('inbounds.protocol')}</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {protocolOrder.map((proto) => (
                 <button
-                  key={k}
+                  key={proto}
                   type="button"
-                  onClick={() => setKind(k)}
+                  onClick={() => setProtocol(proto)}
                   className={cn(
                     'cursor-pointer rounded-xl border p-3 text-left transition',
-                    form.transport === k ? 'border-primary bg-accent/60 ring-2 ring-primary/20' : 'hover:bg-muted',
+                    p === proto ? 'border-primary bg-accent/60 ring-2 ring-primary/20' : 'hover:bg-muted',
                   )}
                 >
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    {t(`inbounds.transports.${k}.title`)}
-                    {k === 'xhttp' && <Badge tone="success">{t('inbounds.recommended')}</Badge>}
-                    {k === 'quic' && <Badge tone="muted">UDP</Badge>}
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                    {t(`inbounds.protocols.${proto}.title`)}
+                    {proto === 'vless' && <Badge tone="success">{t('inbounds.recommended')}</Badge>}
+                    {protocolSpecs[proto].network !== 'tcp' && <Badge tone="muted">{protocolSpecs[proto].network.toUpperCase()}</Badge>}
+                    {proto === 'vmess' && <Badge tone="warning">{t('inbounds.weak')}</Badge>}
                   </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">{t(`inbounds.transports.${k}.text`)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{t(`inbounds.protocols.${proto}.text`)}</div>
                 </button>
               ))}
             </div>
           </div>
         )}
 
+        {!inbound && spec.transports.length > 1 && (
+          <Field label={t('inbounds.transport')} hint={t(`inbounds.transportHints.${form.transport}`, { defaultValue: '' })} error={errors.transport}>
+            {(id) => (
+              <Select id={id} value={form.transport} onChange={(e) => set('transport', e.target.value as Transport)}>
+                {spec.transports.map((tr) => (
+                  <option key={tr} value={tr}>
+                    {t(`inbounds.transportNames.${tr}`)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
           <Field label={t('inbounds.remark')} error={errors.remark}>
             {(id) => (
-              <Input id={id} value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder={t('inbounds.remarkPlaceholder')} maxLength={64} />
+              <Input id={id} value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder={kindLabel(p, form.transport)} maxLength={64} />
             )}
           </Field>
           <Field label={t('inbounds.port')} error={errors.port}>
             {(id) => <Input id={id} inputMode="numeric" value={String(port)} onChange={(e) => set('port', num(e.target.value))} />}
           </Field>
         </div>
-        {!errors.port && <p className="-mt-2 text-xs text-muted-foreground">{t(isHy ? 'inbounds.udpPortHint' : 'inbounds.portHint')}</p>}
+        {!errors.port && <p className="-mt-2 text-xs text-muted-foreground">{t(portHint)}</p>}
 
-        {isHy ? (
+        {realityProtocols.includes(p) && (
+          <Field label={t('inbounds.target')} hint={t('inbounds.targetHint')} error={errors.target}>
+            {(id) => (
+              <>
+                <Input id={id} list="reality-targets" value={form.target} onChange={(e) => set('target', e.target.value)} required />
+                <datalist id="reality-targets">
+                  {suggest.data?.targets.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </>
+            )}
+          </Field>
+        )}
+        {p === 'shadowtls' && (
+          <Field label={t('inbounds.handshake')} hint={t('inbounds.handshakeHint')} error={errors.target}>
+            {(id) => (
+              <>
+                <Input id={id} list="reality-targets" value={form.target} onChange={(e) => set('target', e.target.value)} required />
+                <datalist id="reality-targets">
+                  {suggest.data?.targets.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </>
+            )}
+          </Field>
+        )}
+        {p === 'hysteria2' && (
           <>
             <Field label={t('inbounds.masquerade')} hint={t('inbounds.masqueradeHint')} error={errors.masquerade}>
               {(id) => (
@@ -308,17 +414,6 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
               <Switch checked={form.obfs} onChange={(v) => set('obfs', v)} label={t('inbounds.obfs')} />
             </div>
           </>
-        ) : (
-          <Field label={t('inbounds.target')} hint={t('inbounds.targetHint')} error={errors.target}>
-            {(id) => (
-              <>
-                <Input id={id} list="reality-targets" value={form.target} onChange={(e) => set('target', e.target.value)} required />
-                <datalist id="reality-targets">
-                  {suggest.data?.targets.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              </>
-            )}
-          </Field>
         )}
 
         <button
@@ -335,11 +430,15 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
             <Field label={t('inbounds.address')} hint={t('inbounds.addressHint', { host: suggest.data?.publicHost ?? '…' })} error={errors.address}>
               {(id) => <Input id={id} value={form.address} onChange={(e) => set('address', e.target.value)} />}
             </Field>
-            {isHy ? (
+
+            {(p === 'hysteria2' || certProtocols.includes(p)) && (
+              <Field label={t('inbounds.hySni')} hint={t('inbounds.hySniHint')} error={errors.serverName}>
+                {(id) => <Input id={id} value={form.serverName} onChange={(e) => set('serverName', e.target.value)} placeholder="www.bing.com" />}
+              </Field>
+            )}
+
+            {p === 'hysteria2' && (
               <>
-                <Field label={t('inbounds.hySni')} hint={t('inbounds.hySniHint')} error={errors.serverName}>
-                  {(id) => <Input id={id} value={form.serverName} onChange={(e) => set('serverName', e.target.value)} />}
-                </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t('inbounds.upMbps')} error={errors.upMbps}>
                     {(id) => <Input id={id} inputMode="numeric" value={String(form.upMbps)} onChange={(e) => set('upMbps', num(e.target.value))} />}
@@ -350,7 +449,9 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                 </div>
                 <p className="-mt-2 text-xs text-muted-foreground">{t('inbounds.bandwidthHint')}</p>
               </>
-            ) : (
+            )}
+
+            {realityProtocols.includes(p) && (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t('inbounds.serverName')} hint={t('inbounds.serverNameHint')} error={errors.serverName}>
@@ -391,9 +492,16 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                     {(id) => <Input id={id} value={form.grpcServiceName} onChange={(e) => set('grpcServiceName', e.target.value)} />}
                   </Field>
                 )}
-                <p className="text-xs text-muted-foreground">{t('inbounds.keysNote')}</p>
               </>
             )}
+
+            {p === 'vmess' && form.transport === 'ws' && (
+              <Field label="WebSocket path" hint={t('inbounds.xhttpPathHint')} error={errors.wsPath}>
+                {(id) => <Input id={id} value={form.wsPath} onChange={(e) => set('wsPath', e.target.value)} placeholder="/…" />}
+              </Field>
+            )}
+
+            <p className="text-xs text-muted-foreground">{t('inbounds.keysNote')}</p>
           </div>
         )}
 

@@ -18,6 +18,7 @@ $files = @(
     "bin\panel-linux-amd64",
     "scripts\install-xray.sh",
     "scripts\install-hysteria.sh",
+    "scripts\install-singbox.sh",
     "deploy\panel.service",
     "deploy\remote-install.sh"
 ) | ForEach-Object { Join-Path $root $_ }

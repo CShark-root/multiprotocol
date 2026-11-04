@@ -15,8 +15,9 @@ import (
 type linkDTO struct {
 	InboundID int64  `json:"inboundId"`
 	Remark    string `json:"remark"`
+	Protocol  string `json:"protocol"`
 	Transport string `json:"transport"`
-	URL       string `json:"url"`
+	URL       string `json:"url"` // "" when the protocol has no share-link format
 }
 
 func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
@@ -36,15 +37,17 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	links := []linkDTO{}
 	for _, ib := range inbounds {
-		if !ib.Enabled {
-			continue
-		}
-		if url := subscription.Link(ib, u, s.PublicHost); url != "" {
-			links = append(links, linkDTO{InboundID: ib.ID, Remark: ib.Remark, Transport: ib.Transport, URL: url})
+		if ib.Enabled {
+			links = append(links, linkDTO{
+				InboundID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport,
+				URL: subscription.Link(ib, u, s.PublicHost),
+			})
 		}
 	}
+	sub := s.SubBaseURL + u.SubToken
 	writeJSON(w, http.StatusOK, map[string]any{
-		"subscriptionUrl": s.SubBaseURL + u.SubToken,
+		"subscriptionUrl": sub,
+		"singboxUrl":      sub + "?format=singbox",
 		"links":           links,
 	})
 }
@@ -60,6 +63,21 @@ type SubscriptionDeps struct {
 	Store      *store.Store
 	PublicHost string
 	Decoy      config.DecoyMode
+}
+
+// wantsSingBox picks the sing-box JSON format for ?format=singbox and for
+// the official sing-box apps (SFA/SFI/SFM/SFT user agents).
+func wantsSingBox(r *http.Request) bool {
+	if f := r.URL.Query().Get("format"); f != "" {
+		return f == "singbox"
+	}
+	ua := strings.ToLower(r.UserAgent())
+	for _, s := range []string{"sing-box", "sfa/", "sfi/", "sfm/", "sft/"} {
+		if strings.Contains(ua, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func NewSubscription(d SubscriptionDeps) http.Handler {
@@ -82,13 +100,23 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 			return
 		}
 		h := w.Header()
-		h.Set("Content-Type", "text/plain; charset=utf-8")
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Profile-Title", subscription.ProfileTitle(u))
 		h.Set("Subscription-Userinfo", subscription.UserInfo(u))
 		h.Set("Profile-Update-Interval", strconv.Itoa(int(subscription.UpdateInterval.Hours())))
+		if wantsSingBox(r) {
+			body, err := subscription.SingBoxConfig(inbounds, u, d.PublicHost)
+			if err != nil {
+				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.Set("Content-Type", "application/json; charset=utf-8")
+			w.Write(body)
+			return
+		}
+		h.Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte(subscription.Body(subscription.Links(inbounds, u, d.PublicHost))))
 	})
 }

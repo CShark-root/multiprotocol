@@ -10,7 +10,7 @@ import (
 	"panel/internal/panel/store"
 )
 
-// Email is the per-user tag Xray reports traffic under. It uses the stable
+// Email is the per-user tag cores report traffic under. It uses the stable
 // id, not the editable name.
 func Email(userID int64) string { return "u" + strconv.FormatInt(userID, 10) }
 
@@ -31,13 +31,16 @@ var privateCIDRs = []string{
 	"::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
 }
 
+// xrayProtocols are the inbound protocols served by Xray.
+var xrayProtocols = map[string]bool{"vless": true, "trojan": true, "vmess": true, "shadowsocks": true}
+
 // Xray builds the Xray config for the enabled inbounds and active users.
 // It returns nil when there is nothing to serve, meaning "stop the core".
 func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte, error) {
 	var ins []any
 	for _, ib := range inbounds {
-		if ib.Enabled && ib.Protocol == "vless" {
-			ins = append(ins, vlessInbound(ib, users))
+		if ib.Enabled && xrayProtocols[ib.Protocol] {
+			ins = append(ins, xrayInbound(ib, users))
 		}
 	}
 	if len(ins) == 0 {
@@ -73,16 +76,64 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte,
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
-func vlessInbound(ib store.Inbound, users []store.User) map[string]any {
-	clients := []any{}
-	for _, u := range users {
-		c := map[string]any{"id": u.UUID, "email": Email(u.ID)}
-		if ib.Transport == "tcp" {
-			c["flow"] = "xtls-rprx-vision"
-		}
-		clients = append(clients, c)
+func xrayInbound(ib store.Inbound, users []store.User) map[string]any {
+	in := map[string]any{
+		"tag":    "in-" + strconv.FormatInt(ib.ID, 10),
+		"listen": "0.0.0.0",
+		"port":   ib.Port,
+		"sniffing": map[string]any{
+			"enabled":      true,
+			"destOverride": []string{"http", "tls", "quic"},
+			"routeOnly":    true,
+		},
 	}
+	clients := []any{}
+	switch ib.Protocol {
+	case "vless":
+		for _, u := range users {
+			c := map[string]any{"id": u.UUID, "email": Email(u.ID)}
+			if ib.Transport == "tcp" {
+				c["flow"] = "xtls-rprx-vision"
+			}
+			clients = append(clients, c)
+		}
+		in["protocol"] = "vless"
+		in["settings"] = map[string]any{"clients": clients, "decryption": "none"}
+		in["streamSettings"] = realityStream(ib)
+	case "trojan":
+		for _, u := range users {
+			clients = append(clients, map[string]any{"password": u.UUID, "email": Email(u.ID)})
+		}
+		in["protocol"] = "trojan"
+		in["settings"] = map[string]any{"clients": clients}
+		in["streamSettings"] = realityStream(ib)
+	case "vmess":
+		for _, u := range users {
+			clients = append(clients, map[string]any{"id": u.UUID, "email": Email(u.ID)})
+		}
+		in["protocol"] = "vmess"
+		in["settings"] = map[string]any{"clients": clients}
+		stream := map[string]any{"network": "raw", "security": "none"}
+		if ib.Transport == "ws" && ib.Settings.WS != nil {
+			stream["network"] = "ws"
+			stream["wsSettings"] = map[string]any{"path": ib.Settings.WS.Path}
+		}
+		in["streamSettings"] = stream
+	case "shadowsocks":
+		for _, u := range users {
+			clients = append(clients, map[string]any{"password": SSUserKey(u.UUID), "email": Email(u.ID)})
+		}
+		ss := ib.Settings.Shadowsocks
+		in["protocol"] = "shadowsocks"
+		in["settings"] = map[string]any{
+			"method": ss.Method, "password": ss.ServerPSK, "clients": clients, "network": "tcp,udp",
+		}
+	}
+	return in
+}
 
+// realityStream is the stream settings shared by VLESS and Trojan.
+func realityStream(ib store.Inbound) map[string]any {
 	r := ib.Settings.Reality
 	stream := map[string]any{
 		"security": "reality",
@@ -105,18 +156,5 @@ func vlessInbound(ib store.Inbound, users []store.User) map[string]any {
 	default:
 		stream["network"] = "raw"
 	}
-
-	return map[string]any{
-		"tag":            "in-" + strconv.FormatInt(ib.ID, 10),
-		"listen":         "0.0.0.0",
-		"port":           ib.Port,
-		"protocol":       "vless",
-		"settings":       map[string]any{"clients": clients, "decryption": "none"},
-		"streamSettings": stream,
-		"sniffing": map[string]any{
-			"enabled":      true,
-			"destOverride": []string{"http", "tls", "quic"},
-			"routeOnly":    true,
-		},
-	}
+	return stream
 }

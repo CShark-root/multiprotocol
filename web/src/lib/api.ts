@@ -74,11 +74,21 @@ export type UserInput = {
 
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
-/** VLESS transports plus 'quic' for Hysteria2: one value per kind of inbound. */
-export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'quic'
-export type Protocol = 'vless' | 'hysteria2'
+export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
+export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'ws' | 'quic'
 
-export const protocolOf = (t: Transport): Protocol => (t === 'quic' ? 'hysteria2' : 'vless')
+/** What the wizard offers per protocol; mirrors the server's protocol registry. */
+export const protocolSpecs: Record<Protocol, { transports: Transport[]; core: 'xray' | 'hysteria' | 'singbox'; network: string }> = {
+  vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp' },
+  trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp' },
+  shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp' },
+  vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp' },
+  hysteria2: { transports: ['quic'], core: 'hysteria', network: 'udp' },
+  tuic: { transports: ['quic'], core: 'singbox', network: 'udp' },
+  anytls: { transports: ['tcp'], core: 'singbox', network: 'tcp' },
+  shadowtls: { transports: ['tcp'], core: 'singbox', network: 'tcp' },
+}
+export const protocolOrder = Object.keys(protocolSpecs) as Protocol[]
 
 export type Inbound = {
   id: number
@@ -86,7 +96,10 @@ export type Inbound = {
   protocol: Protocol
   transport: Transport
   security: string
-  network: 'tcp' | 'udp'
+  network: string // tcp | udp | tcp+udp
+  core: 'xray' | 'hysteria' | 'singbox'
+  testKit: boolean
+  wsPath?: string
   port: number
   address: string
   enabled: boolean
@@ -118,6 +131,7 @@ export type InboundInput = {
   xhttpPath: string
   xhttpMode: string
   grpcServiceName: string
+  wsPath: string
   obfs: boolean
   masquerade: string
   upMbps: number
@@ -136,7 +150,8 @@ export type InboundSuggest = {
 
 export type UserLinks = {
   subscriptionUrl: string
-  links: { inboundId: number; remark: string; transport: Transport; url: string }[]
+  singboxUrl: string
+  links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; url: string }[]
 }
 
 export type SystemInfo = {
@@ -178,7 +193,9 @@ export const api = {
   },
   inbounds: {
     list: () => request<Inbound[]>('GET', 'inbounds'),
-    suggest: (network: 'tcp' | 'udp') => request<InboundSuggest>('GET', `inbounds/suggest?network=${network}`),
+    suggest: (protocol: Protocol) => request<InboundSuggest>('GET', `inbounds/suggest?protocol=${protocol}`),
+    createTestKit: () => request<{ inbounds: number }>('POST', 'inbounds/test-kit', {}),
+    deleteTestKit: () => request<{ inbounds: number }>('DELETE', 'inbounds/test-kit'),
     create: (input: InboundInput) => request<Inbound>('POST', 'inbounds', input),
     update: (id: number, input: InboundInput) => request<Inbound>('PUT', `inbounds/${id}`, input),
     remove: (id: number) => request<void>('DELETE', `inbounds/${id}`),

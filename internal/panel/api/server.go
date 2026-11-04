@@ -81,6 +81,8 @@ func New(d Deps) http.Handler {
 					r.Get("/", s.listInbounds)
 					r.Post("/", s.createInbound)
 					r.Get("/suggest", s.suggestInbound)
+					r.Post("/test-kit", s.createTestKit)
+					r.Delete("/test-kit", s.deleteTestKit)
 					r.Get("/{id}", s.getInbound)
 					r.Put("/{id}", s.updateInbound)
 					r.Delete("/{id}", s.deleteInbound)

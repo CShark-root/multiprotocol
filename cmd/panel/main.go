@@ -25,6 +25,7 @@ import (
 
 	"panel/internal/agent"
 	"panel/internal/agent/hysteria"
+	"panel/internal/agent/singbox"
 	"panel/internal/agent/xray"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
@@ -59,7 +60,8 @@ func serve(args []string) int {
 	noAgent := fsFlags.Bool("no-local-agent", false, "do not run the embedded agent (multi-node panel host)")
 	xrayBin := fsFlags.String("xray-bin", defaultXrayBin(), "path to the xray binary (geo .dat files next to it)")
 	xrayAPI := fsFlags.String("xray-api", "127.0.0.1:62789", "local address for the Xray stats API")
-	hysteriaBin := fsFlags.String("hysteria-bin", defaultHysteriaBin(), "path to the Hysteria 2 binary")
+	hysteriaBin := fsFlags.String("hysteria-bin", defaultCoreBin("hysteria", "hysteria"), "path to the Hysteria 2 binary")
+	singboxBin := fsFlags.String("singbox-bin", defaultCoreBin("sing-box", "sing-box"), "path to the sing-box binary")
 	fsFlags.Parse(args)
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -95,7 +97,8 @@ func serve(args []string) int {
 	if !*noAgent {
 		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), *xrayAPI, log)
 		hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
-		localAgent = agent.New(xr, hy)
+		sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
+		localAgent = agent.New(xr, hy, sb)
 		defer localAgent.Stop()
 		syncer = service.NewSyncer(st, localAgent, *xrayAPI, log)
 		changed = syncer.Trigger
@@ -195,12 +198,12 @@ func defaultXrayBin() string {
 	return "xray"
 }
 
-// defaultHysteriaBin is where scripts/install-hysteria.sh puts the core.
-func defaultHysteriaBin() string {
+// defaultCoreBin is where scripts/install-<core>.sh puts a core on Linux.
+func defaultCoreBin(dir, name string) string {
 	if runtime.GOOS == "linux" {
-		return "/usr/local/lib/panel/hysteria/hysteria"
+		return "/usr/local/lib/panel/" + dir + "/" + name
 	}
-	return "hysteria"
+	return name
 }
 
 func loadCert(dataDir string, cfg config.Config) (tls.Certificate, error) {

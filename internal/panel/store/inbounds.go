@@ -16,6 +16,7 @@ type Inbound struct {
 	Address   string
 	Settings  InboundSettings
 	Enabled   bool
+	TestKit   bool // created by the "test kit" button, removed with it
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -23,10 +24,34 @@ type Inbound struct {
 // InboundSettings is stored as JSON; only the fields for the inbound's
 // transport are set.
 type InboundSettings struct {
-	Reality  *RealitySettings  `json:"reality,omitempty"`
-	XHTTP    *XHTTPSettings    `json:"xhttp,omitempty"`
-	GRPC     *GRPCSettings     `json:"grpc,omitempty"`
-	Hysteria *HysteriaSettings `json:"hysteria,omitempty"`
+	Reality     *RealitySettings     `json:"reality,omitempty"`
+	XHTTP       *XHTTPSettings       `json:"xhttp,omitempty"`
+	GRPC        *GRPCSettings        `json:"grpc,omitempty"`
+	WS          *WSSettings          `json:"ws,omitempty"`
+	Hysteria    *HysteriaSettings    `json:"hysteria,omitempty"`
+	TLS         *TLSSettings         `json:"tls,omitempty"`         // self-signed cert: TUIC, AnyTLS
+	Shadowsocks *ShadowsocksSettings `json:"shadowsocks,omitempty"` // Shadowsocks-2022, also inside ShadowTLS
+	ShadowTLS   *ShadowTLSSettings   `json:"shadowtls,omitempty"`
+}
+
+type WSSettings struct {
+	Path string `json:"path"`
+}
+
+type TLSSettings struct {
+	SNI       string `json:"sni"`
+	CertPEM   string `json:"certPem"`
+	KeyPEM    string `json:"keyPem"`
+	PinSHA256 string `json:"pinSha256"`
+}
+
+type ShadowsocksSettings struct {
+	Method    string `json:"method"`    // 2022-blake3-aes-128-gcm
+	ServerPSK string `json:"serverPsk"` // base64, 16 bytes; each user adds their own key
+}
+
+type ShadowTLSSettings struct {
+	Handshake string `json:"handshake"` // host:port of the real site whose TLS handshake is borrowed
 }
 
 type HysteriaSettings struct {
@@ -67,10 +92,11 @@ type InboundFields struct {
 	Address   string
 	Settings  InboundSettings
 	Enabled   bool
+	TestKit   bool
 }
 
 const inboundColumns = `id, remark, protocol, transport, security, port, address, settings_json,
-	enabled, created_at, updated_at`
+	enabled, test_kit, created_at, updated_at`
 
 func (s *Store) ListInbounds(ctx context.Context) ([]Inbound, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+inboundColumns+` FROM inbounds ORDER BY id`)
@@ -100,9 +126,9 @@ func (s *Store) CreateInbound(ctx context.Context, f InboundFields, now time.Tim
 		return Inbound{}, err
 	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO inbounds
-		(remark, protocol, transport, security, port, address, settings_json, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled,
+		(remark, protocol, transport, security, port, address, settings_json, enabled, test_kit, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled, f.TestKit,
 		now.Unix(), now.Unix())
 	if err != nil {
 		return Inbound{}, err
@@ -151,16 +177,16 @@ func (s *Store) DeleteInbound(ctx context.Context, id int64) error {
 func scanInbound(row scanner) (Inbound, error) {
 	var in Inbound
 	var settings string
-	var enabled, created, updated int64
+	var enabled, testKit, created, updated int64
 	err := row.Scan(&in.ID, &in.Remark, &in.Protocol, &in.Transport, &in.Security, &in.Port, &in.Address,
-		&settings, &enabled, &created, &updated)
+		&settings, &enabled, &testKit, &created, &updated)
 	if err != nil {
 		return Inbound{}, err
 	}
 	if err := json.Unmarshal([]byte(settings), &in.Settings); err != nil {
 		return Inbound{}, err
 	}
-	in.Enabled = enabled != 0
+	in.Enabled, in.TestKit = enabled != 0, testKit != 0
 	in.CreatedAt, in.UpdatedAt = fromUnix(created), fromUnix(updated)
 	return in, nil
 }
