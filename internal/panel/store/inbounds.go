@@ -32,6 +32,24 @@ type InboundSettings struct {
 	TLS         *TLSSettings         `json:"tls,omitempty"`         // self-signed cert: TUIC, AnyTLS
 	Shadowsocks *ShadowsocksSettings `json:"shadowsocks,omitempty"` // Shadowsocks-2022, also inside ShadowTLS
 	ShadowTLS   *ShadowTLSSettings   `json:"shadowtls,omitempty"`
+
+	// Expert, Xray inbounds only; nil = Xray defaults.
+	Sniffing *SniffingSettings `json:"sniffing,omitempty"`
+	Sockopt  *SockoptSettings  `json:"sockopt,omitempty"`
+}
+
+type SniffingSettings struct {
+	Enabled      bool     `json:"enabled"`
+	DestOverride []string `json:"destOverride"` // http, tls, quic, fakedns
+	MetadataOnly bool     `json:"metadataOnly"`
+	RouteOnly    bool     `json:"routeOnly"`
+}
+
+type SockoptSettings struct {
+	TCPFastOpen         bool   `json:"tcpFastOpen,omitempty"`
+	TCPCongestion       string `json:"tcpCongestion,omitempty"` // bbr | cubic | reno
+	TCPMptcp            bool   `json:"tcpMptcp,omitempty"`
+	AcceptProxyProtocol bool   `json:"acceptProxyProtocol,omitempty"`
 }
 
 type WSSettings struct {
@@ -72,11 +90,48 @@ type RealitySettings struct {
 	PublicKey   string   `json:"publicKey"`
 	ShortIDs    []string `json:"shortIds"`
 	Fingerprint string   `json:"fingerprint"` // client uTLS fingerprint, e.g. chrome
+
+	// Expert; zero values = Xray defaults.
+	Xver          int    `json:"xver,omitempty"`        // PROXY protocol version sent to the target: 0-2
+	MaxTimeDiff   int    `json:"maxTimeDiff,omitempty"` // ms of allowed client clock skew; 0 = no check
+	MinClientVer  string `json:"minClientVer,omitempty"`
+	MaxClientVer  string `json:"maxClientVer,omitempty"`
+	SpiderX       string `json:"spiderX,omitempty"`       // client: path the crawler fetches
+	MLDSA65Seed   string `json:"mldsa65Seed,omitempty"`   // server: post-quantum signature key
+	MLDSA65Verify string `json:"mldsa65Verify,omitempty"` // client: matching verification key
 }
 
 type XHTTPSettings struct {
 	Path string `json:"path"`
 	Mode string `json:"mode"` // auto | packet-up | stream-up | stream-one
+
+	// Expert; empty = Xray defaults. Ranges are "N" or "N-M".
+	Host                string            `json:"host,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	PaddingBytes        string            `json:"paddingBytes,omitempty"`
+	PaddingObfsMode     bool              `json:"paddingObfsMode,omitempty"`
+	PaddingPlacement    string            `json:"paddingPlacement,omitempty"` // queryInHeader | header | cookie | query
+	PaddingMethod       string            `json:"paddingMethod,omitempty"`    // repeat-x | tokenish
+	UplinkHTTPMethod    string            `json:"uplinkHttpMethod,omitempty"` // POST | PUT | PATCH | GET (packet-up only)
+	SessionPlacement    string            `json:"sessionPlacement,omitempty"` // path | cookie | header | query
+	SeqPlacement        string            `json:"seqPlacement,omitempty"`
+	UplinkDataPlacement string            `json:"uplinkDataPlacement,omitempty"` // auto | body | cookie | header
+	NoSSEHeader         bool              `json:"noSseHeader,omitempty"`
+	NoGRPCHeader        bool              `json:"noGrpcHeader,omitempty"`
+	MaxEachPostBytes    string            `json:"maxEachPostBytes,omitempty"`
+	MinPostsIntervalMs  string            `json:"minPostsIntervalMs,omitempty"`
+	MaxBufferedPosts    int               `json:"maxBufferedPosts,omitempty"`
+	StreamUpServerSecs  string            `json:"streamUpServerSecs,omitempty"`
+	Xmux                *XmuxSettings     `json:"xmux,omitempty"` // client-side connection reuse
+}
+
+type XmuxSettings struct {
+	MaxConcurrency   string `json:"maxConcurrency,omitempty"`
+	MaxConnections   string `json:"maxConnections,omitempty"`
+	CMaxReuseTimes   string `json:"cMaxReuseTimes,omitempty"`
+	HMaxRequestTimes string `json:"hMaxRequestTimes,omitempty"`
+	HMaxReusableSecs string `json:"hMaxReusableSecs,omitempty"`
+	HKeepAlivePeriod int    `json:"hKeepAlivePeriod,omitempty"`
 }
 
 type GRPCSettings struct {

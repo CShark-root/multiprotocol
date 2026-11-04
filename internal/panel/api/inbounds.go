@@ -44,6 +44,8 @@ type inboundDTO struct {
 	UpMbps     int    `json:"upMbps,omitempty"`
 	DownMbps   int    `json:"downMbps,omitempty"`
 	CertPin    string `json:"certPin,omitempty"`
+
+	Expert service.ExpertInput `json:"expert"`
 }
 
 type inboundInputDTO struct {
@@ -64,6 +66,8 @@ type inboundInputDTO struct {
 	UpMbps          int    `json:"upMbps"`
 	DownMbps        int    `json:"downMbps"`
 	Enabled         *bool  `json:"enabled"` // omitted = true
+
+	Expert service.ExpertInput `json:"expert"`
 }
 
 func toInboundDTO(ib store.Inbound) inboundDTO {
@@ -101,6 +105,17 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	if st := ib.Settings.ShadowTLS; st != nil {
 		d.Target = st.Handshake
 	}
+	if r := ib.Settings.Reality; r != nil {
+		d.Expert.Reality = &service.RealityExpert{
+			Xver: r.Xver, MaxTimeDiff: r.MaxTimeDiff, MinClientVer: r.MinClientVer, MaxClientVer: r.MaxClientVer,
+			SpiderX: r.SpiderX, ShortIDs: r.ShortIDs, MLDSA65: r.MLDSA65Seed != "",
+		}
+	}
+	if x := ib.Settings.XHTTP; x != nil {
+		cp := *x
+		d.Expert.XHTTP = &cp
+	}
+	d.Expert.Sniffing, d.Expert.Sockopt = ib.Settings.Sniffing, ib.Settings.Sockopt
 	return d
 }
 
@@ -111,6 +126,7 @@ func (in inboundInputDTO) toInput() service.InboundInput {
 		Transport: in.Transport, Target: in.Target, ServerName: in.ServerName, Fingerprint: in.Fingerprint,
 		XHTTPPath: in.XHTTPPath, XHTTPMode: in.XHTTPMode, GRPCServiceName: in.GRPCServiceName, WSPath: in.WSPath,
 		Obfs: in.Obfs, Masquerade: in.Masquerade, UpMbps: in.UpMbps, DownMbps: in.DownMbps,
+		Expert: in.Expert,
 	}
 }
 

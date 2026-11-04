@@ -5,6 +5,7 @@ import { AlertTriangle, Cable, CheckCircle2, ChevronDown, FlaskConical, Loader2,
 import { ApiError, api, protocolOrder, protocolSpecs, type Inbound, type InboundInput, type Protocol, type Transport } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
+import { ExpertSection } from '@/components/ExpertSection'
 
 // Install scripts per core, for the "not installed" banner.
 const cores = {
@@ -342,6 +343,7 @@ function toInput(ib: Inbound): InboundInput {
     upMbps: ib.upMbps ?? 0,
     downMbps: ib.downMbps ?? 0,
     enabled: ib.enabled,
+    expert: ib.expert ?? {},
   }
 }
 
@@ -363,6 +365,7 @@ const emptyInput: InboundInput = {
   upMbps: 0,
   downMbps: 0,
   enabled: true,
+  expert: {},
 }
 
 function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null; onClose: () => void; onSaved: () => void }) {
@@ -587,6 +590,10 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
 
             <p className="text-xs text-muted-foreground">{t('inbounds.keysNote')}</p>
           </div>
+        )}
+
+        {spec.core === 'xray' && (
+          <ExpertSection protocol={p} transport={form.transport} value={form.expert} onChange={(v) => set('expert', v)} errors={errors} />
         )}
 
         <div className="flex items-start justify-between gap-4 rounded-xl bg-muted/60 p-3.5">

@@ -96,6 +96,27 @@ func TestInboundsAndSubscription(t *testing.T) {
 	}
 	c.expect(400, "POST", "/api/inbounds", map[string]any{"remark": "dup", "transport": "tcp", "port": port, "target": "www.microsoft.com"})
 
+	// Expert settings round-trip; invalid ones are rejected with the field.
+	ex := c.expect(201, "POST", "/api/inbounds", map[string]any{
+		"remark": "expert", "transport": "xhttp", "port": freePort(t), "target": "www.microsoft.com", "xhttpMode": "packet-up",
+		"expert": map[string]any{
+			"reality": map[string]any{"xver": 1, "mldsa65": true, "shortIds": []string{"", "abcd"}},
+			"xhttp":   map[string]any{"paddingBytes": "100-1000", "uplinkHttpMethod": "get", "headers": map[string]string{"X-A": "1"}},
+		},
+	})
+	e := ex["expert"].(map[string]any)
+	if e["reality"].(map[string]any)["mldsa65"] != true || e["xhttp"].(map[string]any)["uplinkHttpMethod"] != "GET" {
+		t.Fatalf("expert round-trip: %v", e)
+	}
+	bad := c.expect(400, "POST", "/api/inbounds", map[string]any{
+		"remark": "bad", "transport": "xhttp", "port": freePort(t), "target": "www.microsoft.com",
+		"expert": map[string]any{"xhttp": map[string]any{"uplinkHttpMethod": "GET"}}, // GET needs packet-up
+	})
+	if bad["error"].(map[string]any)["field"] != "uplinkHttpMethod" {
+		t.Fatalf("expected uplinkHttpMethod error: %v", bad)
+	}
+	c.expect(204, "DELETE", "/api/inbounds/"+itoa(int(ex["id"].(float64))), nil)
+
 	ibPath := "/api/inbounds/" + itoa(int(ib["id"].(float64)))
 	upd := c.expect(200, "PUT", ibPath, map[string]any{"remark": "Main", "transport": "xhttp", "port": port, "target": "www.apple.com", "xhttpPath": ib["xhttpPath"]})
 	if upd["publicKey"] != ib["publicKey"] || upd["serverName"] != "www.apple.com" {

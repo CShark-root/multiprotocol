@@ -40,11 +40,27 @@ func realityQuery(ib store.Inbound) url.Values {
 	if len(r.ShortIDs) > 0 {
 		q.Set("sid", r.ShortIDs[0])
 	}
+	if r.SpiderX != "" {
+		q.Set("spx", r.SpiderX)
+	}
+	if r.MLDSA65Verify != "" {
+		q.Set("pqv", r.MLDSA65Verify)
+	}
 	switch ib.Transport {
 	case "xhttp":
+		x := ib.Settings.XHTTP
 		q.Set("type", "xhttp")
-		q.Set("path", ib.Settings.XHTTP.Path)
-		q.Set("mode", ib.Settings.XHTTP.Mode)
+		q.Set("path", x.Path)
+		q.Set("mode", x.Mode)
+		if x.Host != "" {
+			q.Set("host", x.Host)
+		}
+		// Settings the client must mirror travel as JSON in "extra"
+		// (understood by v2rayN/v2rayNG/Happ and other Xray clients).
+		if extra := compile.XHTTPClientExtra(x); extra != nil {
+			b, _ := json.Marshal(extra)
+			q.Set("extra", string(b))
+		}
 	case "grpc":
 		q.Set("type", "grpc")
 		q.Set("serviceName", ib.Settings.GRPC.ServiceName)

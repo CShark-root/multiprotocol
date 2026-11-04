@@ -96,6 +96,40 @@ export const protocolSpecs: Record<
 }
 export const protocolOrder = Object.keys(protocolSpecs) as Protocol[]
 
+export type XHTTPExpert = {
+  host?: string
+  headers?: Record<string, string>
+  paddingBytes?: string
+  paddingObfsMode?: boolean
+  paddingPlacement?: string
+  paddingMethod?: string
+  uplinkHttpMethod?: string
+  sessionPlacement?: string
+  seqPlacement?: string
+  uplinkDataPlacement?: string
+  noSseHeader?: boolean
+  noGrpcHeader?: boolean
+  maxEachPostBytes?: string
+  minPostsIntervalMs?: string
+  maxBufferedPosts?: number
+  streamUpServerSecs?: string
+  xmux?: {
+    maxConcurrency?: string
+    maxConnections?: string
+    cMaxReuseTimes?: string
+    hMaxRequestTimes?: string
+    hMaxReusableSecs?: string
+    hKeepAlivePeriod?: number
+  }
+}
+
+export type ExpertInput = {
+  reality?: { xver: number; maxTimeDiff: number; minClientVer: string; maxClientVer: string; spiderX: string; shortIds: string[]; mldsa65: boolean }
+  xhttp?: XHTTPExpert
+  sniffing?: { enabled: boolean; destOverride: string[]; metadataOnly: boolean; routeOnly: boolean } | null
+  sockopt?: { tcpFastOpen?: boolean; tcpCongestion?: string; tcpMptcp?: boolean; acceptProxyProtocol?: boolean } | null
+}
+
 export type Inbound = {
   id: number
   remark: string
@@ -123,6 +157,7 @@ export type Inbound = {
   upMbps?: number
   downMbps?: number
   certPin?: string
+  expert: ExpertInput
   createdAt: string
 }
 
@@ -144,6 +179,7 @@ export type InboundInput = {
   upMbps: number
   downMbps: number
   enabled: boolean
+  expert: ExpertInput
 }
 
 export type InboundSuggest = {

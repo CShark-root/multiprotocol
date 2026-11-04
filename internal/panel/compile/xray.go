@@ -77,16 +77,30 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string) ([]byte,
 }
 
 func xrayInbound(ib store.Inbound, users []store.User) map[string]any {
-	in := map[string]any{
-		"tag":    "in-" + strconv.FormatInt(ib.ID, 10),
-		"listen": "0.0.0.0",
-		"port":   ib.Port,
-		"sniffing": map[string]any{
-			"enabled":      true,
-			"destOverride": []string{"http", "tls", "quic"},
-			"routeOnly":    true,
-		},
+	sniffing := map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "routeOnly": true}
+	if s := ib.Settings.Sniffing; s != nil {
+		sniffing = map[string]any{
+			"enabled": s.Enabled, "destOverride": s.DestOverride,
+			"metadataOnly": s.MetadataOnly, "routeOnly": s.RouteOnly,
+		}
 	}
+	in := map[string]any{
+		"tag":      "in-" + strconv.FormatInt(ib.ID, 10),
+		"listen":   "0.0.0.0",
+		"port":     ib.Port,
+		"sniffing": sniffing,
+	}
+	defer func() {
+		// Socket options apply to every stream an inbound has.
+		if so := ib.Settings.Sockopt; so != nil {
+			stream, _ := in["streamSettings"].(map[string]any)
+			if stream == nil {
+				stream = map[string]any{}
+				in["streamSettings"] = stream
+			}
+			stream["sockopt"] = sockopt(*so)
+		}
+	}()
 	clients := []any{}
 	switch ib.Protocol {
 	case "vless":
@@ -132,24 +146,51 @@ func xrayInbound(ib store.Inbound, users []store.User) map[string]any {
 	return in
 }
 
+func sockopt(so store.SockoptSettings) map[string]any {
+	m := map[string]any{}
+	if so.TCPFastOpen {
+		m["tcpFastOpen"] = true
+	}
+	if so.TCPCongestion != "" {
+		m["tcpCongestion"] = so.TCPCongestion
+	}
+	if so.TCPMptcp {
+		m["tcpMptcp"] = true
+	}
+	if so.AcceptProxyProtocol {
+		m["acceptProxyProtocol"] = true
+	}
+	return m
+}
+
 // realityStream is the stream settings shared by VLESS and Trojan.
 func realityStream(ib store.Inbound) map[string]any {
 	r := ib.Settings.Reality
-	stream := map[string]any{
-		"security": "reality",
-		"realitySettings": map[string]any{
-			"show":        false,
-			"target":      r.Target,
-			"xver":        0,
-			"serverNames": r.ServerNames,
-			"privateKey":  r.PrivateKey,
-			"shortIds":    r.ShortIDs,
-		},
+	rs := map[string]any{
+		"show":        false,
+		"target":      r.Target,
+		"xver":        r.Xver,
+		"serverNames": r.ServerNames,
+		"privateKey":  r.PrivateKey,
+		"shortIds":    r.ShortIDs,
 	}
+	if r.MaxTimeDiff > 0 {
+		rs["maxTimeDiff"] = r.MaxTimeDiff
+	}
+	if r.MinClientVer != "" {
+		rs["minClientVer"] = r.MinClientVer
+	}
+	if r.MaxClientVer != "" {
+		rs["maxClientVer"] = r.MaxClientVer
+	}
+	if r.MLDSA65Seed != "" {
+		rs["mldsa65Seed"] = r.MLDSA65Seed
+	}
+	stream := map[string]any{"security": "reality", "realitySettings": rs}
 	switch ib.Transport {
 	case "xhttp":
 		stream["network"] = "xhttp"
-		stream["xhttpSettings"] = map[string]any{"path": ib.Settings.XHTTP.Path, "mode": ib.Settings.XHTTP.Mode}
+		stream["xhttpSettings"] = XHTTPServer(ib.Settings.XHTTP)
 	case "grpc":
 		stream["network"] = "grpc"
 		stream["grpcSettings"] = map[string]any{"serviceName": ib.Settings.GRPC.ServiceName}

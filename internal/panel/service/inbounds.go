@@ -116,6 +116,9 @@ type InboundInput struct {
 	Masquerade string
 	UpMbps     int
 	DownMbps   int
+
+	// Fine-tuning of Xray inbounds; zero value = defaults.
+	Expert ExpertInput
 }
 
 type Inbounds struct {
@@ -234,25 +237,37 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 		return f, validate.Fail("address", "an IP address or a domain name")
 	}
 
+	if err := normalizeProtocol(&f, in); err != nil {
+		return f, err
+	}
+	if spec.Core == "xray" {
+		if err := normalizeExpert(&f, in); err != nil {
+			return f, err
+		}
+	}
+	return f, nil
+}
+
+func normalizeProtocol(f *store.InboundFields, in InboundInput) error {
 	switch f.Protocol {
 	case "vless", "trojan":
-		return f, normalizeReality(&f, in)
+		return normalizeReality(f, in)
 	case "vmess":
 		if f.Transport == "ws" {
 			p, err := normalizePath(in.WSPath, "wsPath")
 			if err != nil {
-				return f, err
+				return err
 			}
 			f.Settings.WS = &store.WSSettings{Path: p}
 		}
 	case "shadowsocks":
 		f.Settings.Shadowsocks = &store.ShadowsocksSettings{Method: SS2022Method}
 	case "hysteria2":
-		return f, normalizeHysteria(&f, in)
+		return normalizeHysteria(f, in)
 	case "tuic", "anytls":
 		sni, err := normalizeSNI(in.ServerName, "www.bing.com")
 		if err != nil {
-			return f, err
+			return err
 		}
 		f.Settings.TLS = &store.TLSSettings{SNI: sni}
 	case "shadowtls":
@@ -261,12 +276,12 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 		}
 		host, port, err := splitTarget(strings.TrimSpace(in.Target))
 		if err != nil {
-			return f, err
+			return err
 		}
 		f.Settings.ShadowTLS = &store.ShadowTLSSettings{Handshake: net.JoinHostPort(host, strconv.Itoa(port))}
 		f.Settings.Shadowsocks = &store.ShadowsocksSettings{Method: SS2022Method}
 	}
-	return f, nil
+	return nil
 }
 
 func normalizeReality(f *store.InboundFields, in InboundInput) error {
@@ -383,6 +398,9 @@ func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound) er
 				return err
 			}
 			r.PrivateKey, r.PublicKey, r.ShortIDs = priv, pub, []string{randomHex(8)}
+		}
+		if err := fillRealityExpertSecrets(r, in, old.Reality); err != nil {
+			return err
 		}
 	}
 	if h := f.Settings.Hysteria; h != nil {
@@ -609,7 +627,7 @@ func NewRealityKeys() (privateKey, publicKey string, err error) {
 func redacted(s store.InboundSettings) store.InboundSettings {
 	if s.Reality != nil {
 		r := *s.Reality
-		r.PrivateKey = ""
+		r.PrivateKey, r.MLDSA65Seed = "", ""
 		s.Reality = &r
 	}
 	if s.Hysteria != nil {

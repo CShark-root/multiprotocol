@@ -61,7 +61,7 @@ export function AppShell() {
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
           <Shield className="h-4 w-4" />
         </div>
-        <span className="text-[15px] font-semibold tracking-tight">panel</span>
+        <span className="text-[15px] font-semibold tracking-tight">MultiProtocol</span>
       </div>
       <nav className="flex-1 space-y-0.5">
         {nav.map((item) => (
@@ -119,7 +119,7 @@ export function AppShell() {
       <aside className="hidden w-64 shrink-0 border-r bg-card/60 p-4 lg:block lg:sticky lg:top-0 lg:h-dvh">{sidebar}</aside>
 
       <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-3 backdrop-blur lg:hidden">
-        <span className="font-semibold tracking-tight">panel</span>
+        <span className="font-semibold tracking-tight">MultiProtocol</span>
         <Button variant="ghost" size="icon" aria-label={t('nav.menu')} onClick={() => setOpen(true)}>
           <Menu className="h-5 w-5" />
         </Button>
