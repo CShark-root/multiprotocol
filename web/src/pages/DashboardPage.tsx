@@ -5,7 +5,8 @@ import { useRouteContext } from '@tanstack/react-router'
 import { ArrowDown, ArrowUp, Check, Clock, Cpu, Gauge, MemoryStick, Power, RotateCw, Wifi } from 'lucide-react'
 import { ApiError, api } from '@/lib/api'
 import { formatBitrate, formatBytes, formatDuration } from '@/lib/utils'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Ring } from '@/components/ui'
+import type { User } from '@/lib/api'
 import { TrafficChart } from '@/components/TrafficChart'
 
 function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; value: string; hint?: string }) {
@@ -84,11 +85,14 @@ export function DashboardPage() {
         />
       </div>
 
-      <Card className="mt-4">
-        <h2 className="font-semibold">{t('dashboard.traffic')}</h2>
-        <p className="mb-4 text-xs text-muted-foreground">{t('dashboard.trafficHint')}</p>
-        {traffic.data ? <TrafficChart data={traffic.data} /> : <div className="h-[180px]" />}
-      </Card>
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <UsersCard users={users.data ?? []} online={online.data?.length ?? 0} />
+        <Card>
+          <h2 className="font-semibold">{t('dashboard.traffic')}</h2>
+          <p className="mb-4 text-xs text-muted-foreground">{t('dashboard.trafficHint')}</p>
+          {traffic.data ? <TrafficChart data={traffic.data} /> : <div className="h-[180px]" />}
+        </Card>
+      </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Card>
@@ -288,5 +292,42 @@ function Row({ label, value, hint, warn }: { label: string; value: string; hint?
         {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </dd>
     </div>
+  )
+}
+
+// UsersCard — кольцо пользователей по статусам, как на макете.
+function UsersCard({ users, online }: { users: User[]; online: number }) {
+  const { t } = useTranslation()
+  const count = (s: User['status']) => users.filter((u) => u.status === s).length
+  const parts = [
+    { key: 'active', value: count('active'), color: 'var(--color-success)' },
+    { key: 'expired', value: count('expired'), color: 'var(--color-warning)' },
+    { key: 'limited', value: count('limited'), color: 'var(--color-destructive)' },
+    { key: 'disabled', value: count('disabled'), color: 'var(--color-muted-foreground)' },
+  ]
+  return (
+    <Card>
+      <h2 className="font-semibold">{t('dashboard.usersTitle')}</h2>
+      <div className="mt-4 flex items-center gap-5">
+        <Ring segments={parts} total={users.length}>
+          <div className="text-2xl font-semibold tracking-tight">{users.length}</div>
+          <div className="text-[11px] text-muted-foreground">{t('dashboard.usersTotal')}</div>
+        </Ring>
+        <ul className="space-y-1.5 text-sm">
+          {parts.map((p) => (
+            <li key={p.key} className="flex items-center gap-2 whitespace-nowrap">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: p.color }} />
+              <span className="text-muted-foreground">{t(`users.status.${p.key}`)}</span>
+              <span className="font-medium tabular-nums">{p.value}</span>
+            </li>
+          ))}
+          <li className="flex items-center gap-2 whitespace-nowrap border-t pt-1.5">
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-success" />
+            <span className="text-muted-foreground">{t('dashboard.online')}</span>
+            <span className="font-medium tabular-nums">{online}</span>
+          </li>
+        </ul>
+      </div>
+    </Card>
   )
 }

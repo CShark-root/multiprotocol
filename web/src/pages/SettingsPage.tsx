@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, extras, type PanelSettings, type SubSettings } from '@/lib/api'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab, Section } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
 
 const tabs = ['access', 'security', 'maintenance'] as const
@@ -46,23 +46,6 @@ export function SettingsPage() {
   )
 }
 
-function Section({ icon, title, hint, actions, children }: { icon: ReactNode; title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
-  return (
-    <Card>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="text-accent-foreground">{icon}</span>
-            <h2 className="font-semibold">{title}</h2>
-          </div>
-          {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
-        </div>
-        {actions && <div className="shrink-0">{actions}</div>}
-      </div>
-      <div className="mt-4">{children}</div>
-    </Card>
-  )
-}
 
 /** Asks for the admin password right before a sensitive action. */
 function PasswordPrompt({

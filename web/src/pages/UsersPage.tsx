@@ -1,10 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarPlus, Pencil, Plus, RotateCcw, Search, Smartphone, Trash2, UserPlus } from 'lucide-react'
+import { Ban, CalendarPlus, ChevronLeft, ChevronRight, CircleCheck, Clock, Gauge, Pencil, Plus, Power, QrCode, RotateCcw, Search, Trash2, UserPlus } from 'lucide-react'
 import { ApiError, api, type OnlineEntry, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
-import { GiB, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
-import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
+import { GiB, cn, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
+import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, RowMenu, Select, Switch, UsageRing } from '@/components/ui'
+import { useSearch } from '@tanstack/react-router'
 import { ShareRow } from '@/components/share'
 import { TrafficChart } from '@/components/TrafficChart'
 import { useKindLabel } from './InboundsPage'
@@ -30,6 +31,8 @@ export function UsersPage() {
   const onlineBy = useMemo(() => new Map((online.data ?? []).map((o) => [o.userId, o])), [online.data])
   const [details, setDetails] = useState<User | null>(null)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const search = useSearch({ strict: false }) as { user?: number }
   const [editing, setEditing] = useState<User | 'new' | null>(null)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [connecting, setConnecting] = useState<User | null>(null)
@@ -52,6 +55,15 @@ export function UsersPage() {
     const list = users.data ?? []
     return q ? list.filter((u) => u.name.toLowerCase().includes(q) || u.note.toLowerCase().includes(q)) : list
   }, [users.data, query])
+
+  const pageSize = 20
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const shown = filtered.slice(page * pageSize, (page + 1) * pageSize)
+  // Быстрый поиск открывает карточку пользователя через ?user=ID.
+  useEffect(() => {
+    const u = search.user ? users.data?.find((x) => x.id === search.user) : undefined
+    if (u) setDetails(u)
+  }, [search.user, users.data])
 
   const lng = i18n.language
   const addButton = (
@@ -79,11 +91,12 @@ export function UsersPage() {
           <EmptyState icon={<UserPlus className="h-6 w-6" />} title={t('users.emptyTitle')} text={t('users.emptyText')} action={addButton} />
         ) : (
           <>
-            <div className="border-b p-4">
-              <div className="relative max-w-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+              <div className="relative w-full max-w-sm">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('users.search')} className="pl-9" />
+                <Input value={query} onChange={(e) => (setQuery(e.target.value), setPage(0))} placeholder={t('users.search')} className="pl-9" />
               </div>
+              <span className="text-xs text-muted-foreground">{t('users.count', { count: filtered.length })}</span>
             </div>
             {filtered.length === 0 ? (
               <p className="p-6 text-sm text-muted-foreground">{t('users.nothingFound')}</p>
@@ -91,57 +104,86 @@ export function UsersPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-5 py-3 font-medium">{t('users.colName')}</th>
-                      <th className="px-5 py-3 font-medium">{t('users.colStatus')}</th>
-                      <th className="px-5 py-3 font-medium">{t('users.colTraffic')}</th>
-                      <th className="px-5 py-3 font-medium">{t('users.colExpire')}</th>
-                      <th className="px-5 py-3 text-right font-medium">{t('users.colActions')}</th>
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="px-5 py-3 font-normal">{t('users.colName')}</th>
+                      <th className="px-5 py-3 font-normal">{t('users.colStatus')}</th>
+                      <th className="px-5 py-3 font-normal">{t('users.colTraffic')}</th>
+                      <th className="px-5 py-3 font-normal">{t('users.colExpire')}</th>
+                      <th className="px-5 py-3" />
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((u) => (
-                      <tr key={u.id} className="border-t transition hover:bg-muted/50">
-                        <td className="px-5 py-3.5">
-                          <button type="button" className="flex items-center gap-2 text-left font-medium hover:underline underline-offset-4" onClick={() => setDetails(u)}>
-                            <OnlineDot entry={onlineBy.get(u.id)} />
-                            {u.name}
-                          </button>
-                          {u.note && <div className="text-xs text-muted-foreground">{u.note}</div>}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <Badge tone={statusTone[u.status]}>{t(`users.status.${u.status}`)}</Badge>
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">
-                          {formatBytes(u.trafficUsed, lng)}
-                          <span className="text-muted-foreground"> / {u.trafficLimit ? formatBytes(u.trafficLimit, lng) : t('common.unlimited')}</span>
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-muted-foreground">
-                          {u.expireAt ? formatDate(u.expireAt, lng) : t('common.never')}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center justify-end gap-1">
-                            <Switch
-                              checked={u.enabled}
-                              label={u.enabled ? t('users.disable') : t('users.enable')}
-                              disabled={toggle.isPending}
-                              onChange={() => toggle.mutate(u)}
-                            />
-                            <Button variant="ghost" size="icon" aria-label={t('users.connect')} title={t('users.connect')} onClick={() => setConnecting(u)}>
-                              <Smartphone className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" aria-label={t('common.edit')} title={t('common.edit')} onClick={() => setEditing(u)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" aria-label={t('common.delete')} title={t('common.delete')} onClick={() => setDeleting(u)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {shown.map((u) => {
+                      const left = u.expireAt ? (new Date(u.expireAt).getTime() - Date.now()) / 86_400_000 : null
+                      return (
+                        <tr key={u.id} className="border-t transition hover:bg-muted/50">
+                          <td className="px-5 py-3">
+                            <button type="button" className="flex items-center gap-2 text-left font-medium underline-offset-4 hover:underline" onClick={() => setDetails(u)}>
+                              <OnlineDot entry={onlineBy.get(u.id)} />
+                              {u.name}
+                            </button>
+                            {u.note && <div className="pl-4 text-xs text-muted-foreground">{u.note}</div>}
+                          </td>
+                          <td className="px-5 py-3">
+                            <Badge tone={statusTone[u.status]}>
+                              <StatusIcon status={u.status} />
+                              {t(`users.status.${u.status}`)}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-2.5 whitespace-nowrap">
+                              <UsageRing part={u.trafficLimit ? u.trafficUsed / u.trafficLimit : null} />
+                              <div className="leading-tight">
+                                <div>{formatBytes(u.trafficUsed, lng)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {u.trafficLimit ? t('users.ofLimit', { limit: formatBytes(u.trafficLimit, lng) }) : t('common.unlimited')}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className={cn('px-5 py-3 whitespace-nowrap', left === null ? 'text-muted-foreground' : left < 0 ? 'text-destructive' : left <= 3 ? 'text-warning' : 'text-muted-foreground')}>
+                            {u.expireAt ? formatDate(u.expireAt, lng) : t('common.never')}
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" aria-label={t('users.connect')} title={t('users.connect')} onClick={() => setConnecting(u)}>
+                                <QrCode className="h-4 w-4" />
+                              </Button>
+                              <RowMenu
+                                label={t('users.more')}
+                                items={[
+                                  { label: t('common.edit'), icon: <Pencil className="h-4 w-4" />, onClick: () => setEditing(u) },
+                                  {
+                                    label: u.enabled ? t('users.disable') : t('users.enable'),
+                                    icon: <Power className="h-4 w-4" />,
+                                    onClick: () => toggle.mutate(u),
+                                  },
+                                  { label: t('common.delete'), icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: () => setDeleting(u) },
+                                ]}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
+                {pages > 1 && (
+                  <div className="flex items-center justify-between gap-3 border-t px-5 py-3 text-xs text-muted-foreground">
+                    <span>{t('users.shown', { from: page * pageSize + 1, to: Math.min((page + 1) * pageSize, filtered.length), total: filtered.length })}</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" aria-label={t('users.prev')} disabled={page === 0} onClick={() => setPage(page - 1)}>
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="tabular-nums">
+                        {page + 1} / {pages}
+                      </span>
+                      <Button variant="ghost" size="icon" aria-label={t('users.next')} disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -541,4 +583,10 @@ function SubFetches({ userId }: { userId: number }) {
       )}
     </div>
   )
+}
+
+// StatusIcon — значок к статусу пользователя в пилюле.
+function StatusIcon({ status }: { status: UserStatus }) {
+  const Icon = { active: CircleCheck, disabled: Ban, expired: Clock, limited: Gauge }[status]
+  return <Icon className="h-3.5 w-3.5" />
 }

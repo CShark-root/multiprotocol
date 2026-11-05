@@ -29,13 +29,13 @@
 }
 
 .dark {
-  --background: oklch(0.2 0.006 70);
+  --background: oklch(0.165 0.006 70);
   --foreground: oklch(0.93 0.008 85);
-  --card: oklch(0.235 0.007 70);
-  --muted: oklch(0.27 0.007 70);
+  --card: oklch(0.2 0.007 70);
+  --muted: oklch(0.245 0.007 70);
   --muted-foreground: oklch(0.7 0.012 80);
-  --border: oklch(0.31 0.007 70);
-  --input: oklch(0.35 0.008 70);
+  --border: oklch(0.28 0.007 70);
+  --input: oklch(0.32 0.008 70);
   --primary: oklch(0.72 0.07 205);
   --primary-foreground: oklch(0.2 0.012 205);
   --accent: oklch(0.3 0.03 205);

@@ -32,7 +32,7 @@ export function Button({
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn('rounded-2xl border bg-card p-5 shadow-[0_1px_2px_oklch(0.2_0.01_70/0.04)]', className)}>{children}</div>
+  return <div className={cn('rounded-2xl border bg-card p-5', className)}>{children}</div>
 }
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
@@ -245,5 +245,124 @@ export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs:
         </button>
       ))}
     </div>
+  )
+}
+
+// Ring — кольцевая диаграмма: доли segments (value, color) от общего total.
+export function Ring({
+  segments,
+  total,
+  size = 112,
+  stroke = 10,
+  children,
+}: {
+  segments: { value: number; color: string }[]
+  total: number
+  size?: number
+  stroke?: number
+  children?: ReactNode
+}) {
+  const r = (size - stroke) / 2
+  const len = 2 * Math.PI * r
+  let offset = 0
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-muted)" strokeWidth={stroke} />
+        {total > 0 &&
+          segments
+            .filter((s) => s.value > 0)
+            .map((s, i) => {
+              const dash = (s.value / total) * len
+              const el = (
+                <circle
+                  key={i}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={r}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={stroke}
+                  strokeDasharray={`${dash} ${len - dash}`}
+                  strokeDashoffset={-offset}
+                />
+              )
+              offset += dash
+              return el
+            })}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
+    </div>
+  )
+}
+
+// UsageRing — маленькое колечко «сколько израсходовано» (0–1); null — без лимита.
+export function UsageRing({ part, size = 26 }: { part: number | null; size?: number }) {
+  const p = part === null ? 0 : Math.min(Math.max(part, 0), 1)
+  const color = p >= 1 ? 'var(--color-destructive)' : p >= 0.8 ? 'var(--color-warning)' : 'var(--color-primary)'
+  return <Ring segments={[{ value: p, color }]} total={1} size={size} stroke={3} />
+}
+
+// RowMenu — меню «⋯» в строке таблицы. Закрывается по щелчку вне и по Esc.
+export function RowMenu({ label, items }: { label: string; items: { label: string; icon?: ReactNode; danger?: boolean; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <Button variant="ghost" size="icon" aria-label={label} title={label} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span aria-hidden className="text-lg leading-none">⋯</span>
+      </Button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-20 mt-1 min-w-44 overflow-hidden rounded-xl border bg-card p-1 shadow-lg">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                it.onClick()
+              }}
+              className={cn('flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted', it.danger && 'text-destructive')}
+            >
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Section — карточка с единой шапкой: значок в плашке, заголовок, пояснение,
+// действия справа. Так выглядят карточки на всех страницах.
+export function Section({ icon, title, hint, actions, children }: { icon: ReactNode; title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
+          <div className="min-w-0">
+            <h2 className="font-semibold leading-8">{title}</h2>
+            {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+          </div>
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
+      </div>
+      <div className="mt-4">{children}</div>
+    </Card>
   )
 }

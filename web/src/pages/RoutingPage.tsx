@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -28,7 +28,7 @@ import {
   type User,
 } from '@/lib/api'
 import { cn, formatBytes } from '@/lib/utils'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
+import { Badge, Button, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab, Section } from '@/components/ui'
 
 const outbounds: Outbound[] = ['direct', 'block', 'warp', 'ipv4']
 // Labels for outbounds, including the admin's own exits ("out:<id>").
@@ -45,23 +45,6 @@ const outboundTone: Record<string, 'muted' | 'danger' | 'accent' | 'warning'> = 
   ipv4: 'warning',
 }
 
-function Section({ icon, title, hint, actions, children }: { icon: ReactNode; title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
-  return (
-    <Card>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="text-accent-foreground">{icon}</span>
-            <h2 className="font-semibold">{title}</h2>
-          </div>
-          {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
-        </div>
-        {actions}
-      </div>
-      <div className="mt-4">{children}</div>
-    </Card>
-  )
-}
 
 function ToggleRow({ title, hint, checked, onChange, disabled }: { title: string; hint: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (

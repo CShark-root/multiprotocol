@@ -56,7 +56,13 @@ const appRoute = createRoute({
 })
 
 const dashboardRoute = createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage })
-const usersRoute = createRoute({ getParentRoute: () => appRoute, path: '/users', component: UsersPage })
+const usersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/users',
+  component: UsersPage,
+  // ?user=7 открывает карточку пользователя (из быстрого поиска).
+  validateSearch: (s: Record<string, unknown>): { user?: number } => ({ user: Number(s.user) > 0 ? Number(s.user) : undefined }),
+})
 const inboundsRoute = createRoute({ getParentRoute: () => appRoute, path: '/inbounds', component: InboundsPage })
 const logsRoute = createRoute({ getParentRoute: () => appRoute, path: '/logs', component: LogsPage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings', component: SettingsPage })
