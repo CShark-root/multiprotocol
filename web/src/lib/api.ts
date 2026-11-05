@@ -303,6 +303,7 @@ export type InboundSuggest = {
 export type UserLinks = {
   subscriptionUrl: string
   singboxUrl: string
+  clashUrl: string
   overLan: boolean
   links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; apps: AppFamily[]; url: string; inSub: boolean }[]
 }

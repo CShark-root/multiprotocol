@@ -115,12 +115,15 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 	}
 	switch ib.Protocol {
 	case "vless", "trojan":
+		// Поля — как у самого Mihomo, когда он разбирает нашу ссылку vless://
+		// (с ней FlClash работает на VPS).
 		if s.Reality == nil {
 			return nil
 		}
 		p["type"] = ib.Protocol
 		if ib.Protocol == "vless" {
 			p["uuid"] = u.UUID
+			p["encryption"], p["xudp"] = "none", true
 		} else {
 			p["password"] = u.UUID
 		}
@@ -141,9 +144,11 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 			if x.Host != "" {
 				opts["host"] = x.Host
 			}
-			if x.Mode != "" && x.Mode != "auto" {
+			opts["mode"] = "auto"
+			if x.Mode != "" {
 				opts["mode"] = x.Mode
 			}
+			mihomoXHTTP(opts, x)
 			p["xhttp-opts"] = opts
 		default:
 			return nil
@@ -190,4 +195,50 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 		return nil
 	}
 	return p
+}
+
+// mihomoXHTTP переносит настройки XHTTP, которые должен повторять клиент,
+// под именами Mihomo (как в «extra» у ссылки). Незнакомые ключи Mihomo
+// пропускает.
+func mihomoXHTTP(opts map[string]any, x *store.XHTTPSettings) {
+	set := func(k, v string) {
+		if v != "" {
+			opts[k] = v
+		}
+	}
+	if len(x.Headers) > 0 {
+		opts["headers"] = x.Headers
+	}
+	set("x-padding-bytes", x.PaddingBytes)
+	set("x-padding-method", x.PaddingMethod)
+	set("x-padding-placement", x.PaddingPlacement)
+	if x.PaddingObfsMode {
+		opts["x-padding-obfs-mode"] = true
+	}
+	set("uplink-http-method", x.UplinkHTTPMethod)
+	set("session-placement", x.SessionPlacement)
+	set("seq-placement", x.SeqPlacement)
+	set("uplink-data-placement", x.UplinkDataPlacement)
+	if x.NoGRPCHeader {
+		opts["no-grpc-header"] = true
+	}
+	set("sc-max-each-post-bytes", x.MaxEachPostBytes)
+	set("sc-min-posts-interval-ms", x.MinPostsIntervalMs)
+	if m := x.Xmux; m != nil {
+		r := map[string]any{}
+		for k, v := range map[string]string{
+			"max-concurrency": m.MaxConcurrency, "max-connections": m.MaxConnections, "c-max-reuse-times": m.CMaxReuseTimes,
+			"h-max-request-times": m.HMaxRequestTimes, "h-max-reusable-secs": m.HMaxReusableSecs,
+		} {
+			if v != "" {
+				r[k] = v
+			}
+		}
+		if m.HKeepAlivePeriod > 0 {
+			r["h-keep-alive-period"] = m.HKeepAlivePeriod
+		}
+		if len(r) > 0 {
+			opts["reuse-settings"] = r
+		}
+	}
 }

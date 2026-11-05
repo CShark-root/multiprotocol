@@ -210,6 +210,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                 {links.data.overLan && <p className="rounded-xl bg-accent px-3.5 py-2.5 text-xs text-accent-foreground">{t('connect.overLan')}</p>}
                 <ShareRow label={t('connect.subXray')} hint={t('connect.subXrayHint', { list: names('xray') })} text={links.data.subscriptionUrl} />
                 <ShareRow label={t('connect.subSingbox')} hint={t('connect.subSingboxHint', { list: names('singbox') })} text={links.data.singboxUrl} />
+                <ShareRow label={t('connect.subClash')} hint={t('connect.subClashHint')} text={links.data.clashUrl} />
               </div>
             )
           })()}

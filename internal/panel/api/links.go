@@ -53,6 +53,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"subscriptionUrl": sub,
 		"singboxUrl":      sub + "?format=singbox",
+		"clashUrl":        sub + "?format=clash",
 		"overLan":         s.SubOverLAN, // plain HTTP, test VM only
 		"links":           links,
 	})
@@ -71,19 +72,12 @@ type SubscriptionDeps struct {
 	Decoy      config.DecoyMode
 }
 
-// wantsMihomo — формат Mihomo (Clash) для ?format=clash и клиентов на нём:
-// FlClash, Clash Meta for Android, Clash Verge, ClashMi, mihomo.
+// wantsMihomo — формат Mihomo (Clash) по ?format=clash. По User-Agent пока не
+// выбирается: FlClash и другие получают обычную подписку, пока формат не
+// проверен на настоящем телефоне.
 func wantsMihomo(r *http.Request) bool {
-	if f := r.URL.Query().Get("format"); f != "" {
-		return f == "clash" || f == "mihomo"
-	}
-	ua := strings.ToLower(r.UserAgent())
-	for _, s := range []string{"clash", "mihomo", "flclash", "stash"} {
-		if strings.Contains(ua, s) {
-			return true
-		}
-	}
-	return false
+	f := r.URL.Query().Get("format")
+	return f == "clash" || f == "mihomo"
 }
 
 // wantsSingBox picks the sing-box JSON format for ?format=singbox and for
