@@ -438,6 +438,7 @@ export const ru = {
     warpIntro: 'Одна кнопка — панель сама создаст ключи и бесплатное устройство WARP. Ключ WARP+ не нужен, его можно добавить потом. Сеть сервера, Docker и Amnezia не затрагиваются: WARP живёт внутри ядер.',
     warpRegister: 'Подключить WARP',
     warpRegistering: 'Регистрируем…',
+    warpApplying: 'Применяю…',
     warpFree: 'бесплатный',
     warpMode: {
       off: 'Выключен',

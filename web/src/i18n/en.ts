@@ -440,6 +440,7 @@ export const en: Messages = {
     warpIntro: 'One click: the panel creates the keys and a free WARP device. No WARP+ key needed; you can add one later. The server network, Docker and Amnezia are left alone: WARP lives inside the cores.',
     warpRegister: 'Connect WARP',
     warpRegistering: 'Registering…',
+    warpApplying: 'Applying…',
     warpFree: 'free',
     warpMode: {
       off: 'Off',

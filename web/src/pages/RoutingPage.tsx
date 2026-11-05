@@ -27,7 +27,7 @@ import {
   type Trace,
   type User,
 } from '@/lib/api'
-import { formatBytes } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
 
 const outbounds: Outbound[] = ['direct', 'block', 'warp', 'ipv4']
@@ -182,6 +182,9 @@ export function RoutingPage() {
   )
 }
 
+// Сколько ждать после перевыпуска WARP, пока Xray перейдёт на новое устройство.
+const settleMs = 8000
+
 type CardProps = { s: RoutingSettings; edit: (fn: (d: RoutingSettings) => void) => void }
 
 function TraceLine({ label, tr }: { label: string; tr: Trace }) {
@@ -201,10 +204,31 @@ function WarpCard({ s, edit, onServer }: CardProps & { onServer: (d: RoutingSett
   const [showLicense, setShowLicense] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const fail = (err: unknown) => (err instanceof ApiError ? err.message : t('common.error'))
-  const register = useMutation({ mutationFn: api.routing.registerWarp, onSuccess: onServer })
+  // Перевыпуск: регистрация у Cloudflare, затем несколько секунд, пока Xray
+  // переходит на новое устройство. Всё это время кнопка заливается цветом,
+  // а «Проверить» недоступна: проверка раньше времени ходит в удалённое устройство.
+  const [settling, setSettling] = useState(false)
+  const [grow, setGrow] = useState(false)
+  const register = useMutation({
+    mutationFn: api.routing.registerWarp,
+    onMutate: () => {
+      // Заливка стартует с нуля: ширина меняется кадром позже, чтобы сработал переход.
+      setGrow(false)
+      requestAnimationFrame(() => requestAnimationFrame(() => setGrow(true)))
+    },
+    onSuccess: (d) => {
+      onServer(d)
+      setSettling(true)
+      setTimeout(() => {
+        setSettling(false)
+        check.mutate()
+      }, settleMs)
+    },
+  })
   const setKey = useMutation({ mutationFn: () => api.routing.warpLicense(license), onSuccess: (d) => (onServer(d), setLicense(''), setShowLicense(false)) })
   const remove = useMutation({ mutationFn: api.routing.deleteWarp, onSuccess: (d) => (onServer(d), setConfirmDelete(false)) })
   const check = useMutation({ mutationFn: api.routing.checkWarp })
+  const reissuing = register.isPending || settling
   const w = s.warp
 
   return (
@@ -310,19 +334,33 @@ function WarpCard({ s, edit, onServer }: CardProps & { onServer: (d: RoutingSett
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" disabled={check.isPending || w.mode === 'off'} onClick={() => check.mutate()}>
+              <Button variant="secondary" size="sm" disabled={check.isPending || w.mode === 'off' || reissuing} onClick={() => check.mutate()}>
                 {check.isPending ? t('routing.checking') : t('routing.check')}
               </Button>
               {!showLicense && (
-                <Button variant="ghost" size="sm" onClick={() => setShowLicense(true)}>
+                <Button variant="ghost" size="sm" disabled={reissuing} onClick={() => setShowLicense(true)}>
                   {t('routing.warpPlusKey')}
                 </Button>
               )}
-              <Button variant="ghost" size="sm" disabled={register.isPending} onClick={() => register.mutate()} title={t('routing.warpReissueHint')}>
-                <RefreshCw className="h-4 w-4" />
-                {t('routing.warpReissue')}
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn('relative overflow-hidden', reissuing && 'disabled:opacity-100')}
+                disabled={reissuing}
+                onClick={() => register.mutate()}
+                title={t('routing.warpReissueHint')}
+              >
+                {reissuing && (
+                  <span
+                    aria-hidden
+                    className="absolute inset-y-0 left-0 rounded-xl bg-primary/20 transition-[width] ease-out"
+                    style={{ width: settling ? '100%' : grow ? '70%' : '0%', transitionDuration: settling ? settleMs + 'ms' : '3000ms' }}
+                  />
+                )}
+                <RefreshCw className={cn('relative h-4 w-4', reissuing && 'animate-spin')} />
+                <span className="relative">{register.isPending ? t('routing.warpRegistering') : settling ? t('routing.warpApplying') : t('routing.warpReissue')}</span>
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}>
+              <Button variant="ghost" size="sm" disabled={reissuing} onClick={() => setConfirmDelete(true)}>
                 <Trash2 className="h-4 w-4" />
                 {t('common.delete')}
               </Button>
