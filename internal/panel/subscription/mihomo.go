@@ -210,8 +210,9 @@ func mihomoXHTTP(opts map[string]any, x *store.XHTTPSettings) {
 	if len(x.Headers) > 0 {
 		opts["headers"] = x.Headers
 	}
-	// x-padding-bytes не передаём: Mihomo понимает его иначе, чем Xray, и с ним
-	// подключение падает (проверено в FlClash на VPS). Без него — работает.
+	// x-padding-bytes обязателен, если он задан на сервере: без него Mihomo шлёт
+	// свой размер, и Xray обрывает XHTTP (проверено на VM: 100 и 100-100 работают).
+	set("x-padding-bytes", x.PaddingBytes)
 	set("x-padding-method", x.PaddingMethod)
 	set("x-padding-placement", x.PaddingPlacement)
 	if x.PaddingObfsMode {
