@@ -794,8 +794,8 @@ func normalizeHop(v string, port int) (string, error) {
 	lo, hi, ok := strings.Cut(v, "-")
 	a, err1 := strconv.Atoi(lo)
 	b, err2 := strconv.Atoi(hi)
-	if !ok || err1 != nil || err2 != nil || a < 1024 || b > 32767 || a >= b || b-a < 10 {
-		return "", validate.Fail("hopPorts", "a range like 20000-30000, within 1024-32767")
+	if !ok || err1 != nil || err2 != nil || a < 1024 || b > 65535 || a >= b || b-a < 10 {
+		return "", validate.Fail("hopPorts", "a range like 20000-30000, within 1024-65535")
 	}
 	if port >= a && port <= b {
 		return "", validate.Fail("hopPorts", "the range must not include the inbound's own port")

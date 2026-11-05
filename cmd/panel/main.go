@@ -637,9 +637,13 @@ func netHelper(args []string) int {
 	if g, err := user.LookupGroup(*group); err == nil {
 		gid, _ = strconv.Atoi(g.Gid)
 	}
+	panelUID := ""
+	if u, err := user.Lookup("panel"); err == nil {
+		panelUID = u.Uid
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := nethelper.Serve(ctx, *socket, gid, log); err != nil {
+	if err := nethelper.Serve(ctx, *socket, gid, panelUID, log); err != nil {
 		log.Error("net helper", "err", err)
 		return 1
 	}

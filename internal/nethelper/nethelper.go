@@ -65,9 +65,10 @@ func ruleset(hops []Hop) string {
 	return b.String()
 }
 
-// listeningUDP lists UDP ports something is bound to (Amnezia's
-// docker-proxy among them), from /proc.
-func listeningUDP() map[int]bool {
+// listeningUDP lists UDP ports other services are bound to (Amnezia's
+// docker-proxy among them), from /proc. Sockets owned by skipUID (the panel
+// user: our own cores, whose temporary sockets come and go) are left out.
+func listeningUDP(skipUID string) map[int]bool {
 	ports := map[int]bool{}
 	for _, f := range []string{"/proc/net/udp", "/proc/net/udp6"} {
 		data, err := os.ReadFile(f)
@@ -78,7 +79,7 @@ func listeningUDP() map[int]bool {
 		sc.Scan() // header
 		for sc.Scan() {
 			fields := strings.Fields(sc.Text())
-			if len(fields) < 4 {
+			if len(fields) < 8 || (skipUID != "" && fields[7] == skipUID) {
 				continue
 			}
 			_, portHex, ok := strings.Cut(fields[1], ":")
@@ -95,32 +96,15 @@ func listeningUDP() map[int]bool {
 	return ports
 }
 
-// ephemeralRange is where the kernel picks source ports for outgoing
-// connections; a redirect there could catch the server's own traffic.
-func ephemeralRange() (int, int) {
-	b, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
-	if err == nil {
-		if f := strings.Fields(string(b)); len(f) == 2 {
-			lo, err1 := strconv.Atoi(f[0])
-			hi, err2 := strconv.Atoi(f[1])
-			if err1 == nil && err2 == nil {
-				return lo, hi
-			}
-		}
-	}
-	return 32768, 60999
-}
-
-// check refuses ranges that would capture another service's port, the
-// kernel's ephemeral ports, or each other.
+// check refuses ranges that would capture another service's port or each
+// other.
 func check(hops []Hop, inUse map[int]bool) error {
-	lo, hi := ephemeralRange()
+	// The kernel's ephemeral ports may overlap: NAT only sees the first packet
+	// of a new flow, so replies to the server's own outgoing connections
+	// (already tracked) are never redirected. Only listening services matter.
 	for i, h := range hops {
 		if err := h.valid(); err != nil {
 			return err
-		}
-		if h.From <= hi && lo <= h.To {
-			return fmt.Errorf("range %d-%d overlaps the system's outgoing ports %d-%d; pick one below %d", h.From, h.To, lo, hi, lo)
 		}
 		for p := range inUse {
 			if p >= h.From && p <= h.To && p != h.Target {
@@ -149,7 +133,7 @@ func apply(ctx context.Context, hops []Hop) error {
 }
 
 // Serve runs the helper: PUT /hops replaces the whole list.
-func Serve(ctx context.Context, socket string, gid int, log *slog.Logger) error {
+func Serve(ctx context.Context, socket string, gid int, panelUID string, log *slog.Logger) error {
 	os.Remove(socket)
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
@@ -179,7 +163,7 @@ func Serve(ctx context.Context, socket string, gid int, log *slog.Logger) error 
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if err := check(hops, listeningUDP()); err != nil {
+		if err := check(hops, listeningUDP(panelUID)); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
