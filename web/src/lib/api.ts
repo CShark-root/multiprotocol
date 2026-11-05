@@ -304,6 +304,7 @@ export type UserLinks = {
   subscriptionUrl: string
   singboxUrl: string
   clashUrl: string
+  xrayUrl: string
   overLan: boolean
   links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; apps: AppFamily[]; url: string; inSub: boolean }[]
 }

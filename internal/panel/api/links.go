@@ -54,6 +54,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 		"subscriptionUrl": sub,
 		"singboxUrl":      sub + "?format=singbox",
 		"clashUrl":        sub + "?format=clash",
+		"xrayUrl":         sub + "?format=links",
 		"overLan":         s.SubOverLAN, // plain HTTP, test VM only
 		"links":           links,
 	})
@@ -81,6 +82,10 @@ func wantsMihomo(r *http.Request) bool {
 		return f == "clash" || f == "mihomo"
 	}
 	ua := strings.ToLower(r.UserAgent())
+	// Hiddify пишет в User-Agent и «ClashMeta», но ему лучше формат sing-box.
+	if strings.Contains(ua, "hiddify") || strings.Contains(ua, "sing-box") {
+		return false
+	}
 	for _, s := range []string{"clash", "mihomo"} {
 		if strings.Contains(ua, s) {
 			return true
@@ -96,7 +101,7 @@ func wantsSingBox(r *http.Request) bool {
 		return f == "singbox"
 	}
 	ua := strings.ToLower(r.UserAgent())
-	for _, s := range []string{"sing-box", "sfa/", "sfi/", "sfm/", "sft/"} {
+	for _, s := range []string{"sing-box", "sfa/", "sfi/", "sfm/", "sft/", "hiddify"} {
 		if strings.Contains(ua, s) {
 			return true
 		}

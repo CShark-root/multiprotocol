@@ -208,9 +208,15 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                 <div className="text-sm font-medium">{t('connect.subscriptions')}</div>
                 <p className="-mt-1 text-xs text-muted-foreground">{t('connect.subscriptionsHint')}</p>
                 {links.data.overLan && <p className="rounded-xl bg-accent px-3.5 py-2.5 text-xs text-accent-foreground">{t('connect.overLan')}</p>}
-                <ShareRow label={t('connect.subXray')} hint={t('connect.subXrayHint', { list: names('xray') })} text={links.data.subscriptionUrl} />
-                <ShareRow label={t('connect.subSingbox')} hint={t('connect.subSingboxHint', { list: names('singbox') })} text={links.data.singboxUrl} />
-                <ShareRow label={t('connect.subClash')} hint={t('connect.subClashHint')} text={links.data.clashUrl} />
+                <ShareRow label={t('connect.subAny')} hint={t('connect.subAnyHint')} text={links.data.subscriptionUrl} />
+                <details className="rounded-xl border p-3">
+                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">{t('connect.subPerApp')}</summary>
+                  <div className="mt-2 space-y-2">
+                    <ShareRow label={t('connect.subXray')} hint={t('connect.subXrayHint', { list: names('xray') })} text={links.data.xrayUrl} />
+                    <ShareRow label={t('connect.subSingbox')} hint={t('connect.subSingboxHint', { list: names('singbox') })} text={links.data.singboxUrl} />
+                    <ShareRow label={t('connect.subClash')} hint={t('connect.subClashHint')} text={links.data.clashUrl} />
+                  </div>
+                </details>
               </div>
             )
           })()}
