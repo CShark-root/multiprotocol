@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Info, KeyRound, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
-import { ApiError, api, type ServerNode, type SystemInfo } from '@/lib/api'
+import { CreditCard, Info, KeyRound, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { ApiError, api, extras, type ServerBilling, type ServerNode, type SystemInfo } from '@/lib/api'
 import { formatBitrate, formatBytes, formatDuration } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader } from '@/components/ui'
 import { CopyButton } from '@/components/share'
@@ -110,6 +110,7 @@ function ThisServer({ system }: { system?: SystemInfo }) {
         {h?.hostname && ` · ${h.hostname}`}
       </div>
       {h ? <Facts h={h} /> : <p className="mt-3 text-sm text-muted-foreground">{t('common.loading')}</p>}
+      <MainBilling />
     </Card>
   )
 }
@@ -172,6 +173,13 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
         </p>
       )}
       {n.online && <p className="mt-3 text-xs text-muted-foreground">{t('servers.usersNow', { count: n.users })}</p>}
+      <BillingRow
+        b={{ paidUntil: n.paidUntil, price: n.price }}
+        onSave={async (date, price) => {
+          await extras.saveNodeBilling(n.id, date, price)
+          qc.invalidateQueries({ queryKey: ['nodes'] })
+        }}
+      />
     </Card>
   )
 }
@@ -269,5 +277,82 @@ function RemoveDialog({ n, onClose }: { n: ServerNode; onClose: () => void }) {
         </div>
       </div>
     </Dialog>
+  )
+}
+
+function MainBilling() {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['billing', 'main'], queryFn: extras.mainBilling })
+  if (!q.data) return null
+  return (
+    <BillingRow
+      b={q.data}
+      onSave={async (date, price) => {
+        qc.setQueryData(['billing', 'main'], await extras.saveMainBilling(date, price))
+      }}
+    />
+  )
+}
+
+// BillingRow — до какого дня оплачен VPS; бот напомнит заранее.
+function BillingRow({ b, onSave }: { b: ServerBilling; onSave: (date: string, price: string) => Promise<void> }) {
+  const { t, i18n } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [date, setDate] = useState('')
+  const [price, setPrice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const paid = b.paidUntil ? new Date(b.paidUntil) : null
+  const days = paid ? Math.round((new Date(paid.toDateString()).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000) : null
+  const shown = paid?.toLocaleDateString(i18n.language) ?? ''
+  const tone = days === null ? 'text-muted-foreground' : days < 0 ? 'text-destructive' : days <= 3 ? 'text-warning' : 'text-muted-foreground'
+  const label = days === null ? t('billing.none') : days < 0 ? t('billing.overdue', { date: shown }) : days <= 3 ? t('billing.soon', { date: shown }) : t('billing.left', { date: shown })
+  const start = () => {
+    setDate(paid ? `${paid.getFullYear()}-${String(paid.getMonth() + 1).padStart(2, '0')}-${String(paid.getDate()).padStart(2, '0')}` : '')
+    setPrice(b.price)
+    setError('')
+    setEditing(true)
+  }
+  if (!editing)
+    return (
+      <button type="button" onClick={start} className={'mt-3 flex cursor-pointer items-center gap-1.5 text-xs hover:underline ' + tone}>
+        <CreditCard className="h-3.5 w-3.5" />
+        {label}
+        {b.price && ` · ${b.price}`}
+      </button>
+    )
+  return (
+    <form
+      className="mt-3 space-y-2 rounded-xl bg-muted/60 p-3"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        setBusy(true)
+        try {
+          await onSave(date, price)
+          setEditing(false)
+        } catch (err) {
+          setError(err instanceof ApiError ? err.message : t('common.error'))
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label={t('billing.paidUntil')}>{(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+        <Field label={t('billing.price')}>
+          {(id) => <Input id={id} value={price} maxLength={40} placeholder={t('billing.pricePlaceholder')} onChange={(e) => setPrice(e.target.value)} />}
+        </Field>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('billing.hint')}</p>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="secondary" onClick={() => setEditing(false)}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" size="sm" disabled={busy}>
+          {t('common.save')}
+        </Button>
+      </div>
+    </form>
   )
 }

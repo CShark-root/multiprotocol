@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
-import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
+import { ApiError, api, basePath, extras, type PanelSettings, type SubSettings } from '@/lib/api'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
 
@@ -22,6 +22,7 @@ export function SettingsPage() {
             <>
               <AddressCard />
               <DomainCard />
+              <SubscriptionCard />
             </>
           )}
           {tab === 'security' && (
@@ -1080,6 +1081,74 @@ function CoresAutoCard() {
             {s.lastError ? ` — ${s.lastError}` : ''}
           </p>
         </div>
+      )}
+    </Section>
+  )
+}
+
+// SubscriptionCard — что подписка сообщает приложению: имя профиля,
+// как часто обновляться, объявление и ссылка на поддержку.
+function SubscriptionCard() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['sub-settings'], queryFn: extras.subSettings })
+  const [form, setForm] = useState<SubSettings | null>(null)
+  const s = form ?? q.data
+  const save = useMutation({
+    mutationFn: () => extras.saveSubSettings(s!),
+    onSuccess: (d) => {
+      qc.setQueryData(['sub-settings'], d)
+      setForm(null)
+    },
+  })
+  const err = save.error instanceof ApiError ? (save.error.field ? `${save.error.field}: ${save.error.message}` : save.error.message) : save.error ? t('common.error') : ''
+  const set = <K extends keyof SubSettings>(k: K, v: SubSettings[K]) => setForm({ ...s!, [k]: v })
+  return (
+    <Section icon={<Send className="h-4 w-4" />} title={t('subSettings.title')} hint={t('subSettings.hint')}>
+      {!s ? (
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+      ) : (
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            save.mutate()
+          }}
+        >
+          <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
+            <Field label={t('subSettings.name')} hint={t('subSettings.nameHint')}>
+              {(id) => <Input id={id} value={s.title} maxLength={60} placeholder="{name}" onChange={(e) => set('title', e.target.value)} />}
+            </Field>
+            <Field label={t('subSettings.interval')}>
+              {(id) => (
+                <Select id={id} value={s.interval} onChange={(e) => set('interval', Number(e.target.value))}>
+                  {[1, 3, 6, 12, 24, 48].map((h) => (
+                    <option key={h} value={h}>
+                      {t('subSettings.hours', { count: h })}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </div>
+          <Field label={t('subSettings.announce')} hint={t('subSettings.announceHint')}>
+            {(id) => <Input id={id} value={s.announce} maxLength={200} onChange={(e) => set('announce', e.target.value)} />}
+          </Field>
+          <Field label={t('subSettings.support')} hint={t('subSettings.supportHint')}>
+            {(id) => <Input id={id} value={s.supportUrl} maxLength={200} placeholder="https://t.me/…" onChange={(e) => set('supportUrl', e.target.value)} />}
+          </Field>
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          {form && (
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setForm(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={save.isPending}>
+                {t('common.save')}
+              </Button>
+            </div>
+          )}
+        </form>
       )}
     </Section>
   )

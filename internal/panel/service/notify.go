@@ -143,7 +143,11 @@ func (n *Notifier) onEvent(e store.Event) {
 	if v, ok := notifyAlias[typ]; ok {
 		typ = v
 	}
-	if !n.ready(s) || !slices.Contains(s.Events, typ) {
+	// Напоминания об оплате админ включил сам, задав дату, — шлём всегда.
+	if typ == EventBillingDue {
+		typ = ""
+	}
+	if !n.ready(s) || (typ != "" && !slices.Contains(s.Events, typ)) {
 		return
 	}
 	name := ""
@@ -201,6 +205,8 @@ func eventText(e store.Event, name string) string {
 			return "🔄 WARP не отвечал — переключаю на " + ep + ": " + e.Message
 		}
 		return "🔄 WARP не отвечал — Xray перезапущен: " + e.Message
+	case EventBillingDue:
+		return billingText(d)
 	case EventNodeDown:
 		return "⚠️ Сервер «" + str(d, "node") + "» не выходит на связь"
 	case EventNodeUp:

@@ -8,24 +8,30 @@ import (
 
 // Node — другой наш сервер с агентом.
 type Node struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Host      string    `json:"host"` // адрес для ссылок клиентов
-	CreatedAt time.Time `json:"createdAt"`
-	LastSeen  time.Time `json:"lastSeen"`
+	ID        int64      `json:"id"`
+	Name      string     `json:"name"`
+	Host      string     `json:"host"` // адрес для ссылок клиентов
+	CreatedAt time.Time  `json:"createdAt"`
+	LastSeen  time.Time  `json:"lastSeen"`
+	PaidUntil *time.Time `json:"paidUntil"` // до какого дня оплачен VPS
+	Price     string     `json:"price"`
 }
 
-const nodeColumns = `id, name, host, created_at, last_seen`
+const nodeColumns = `id, name, host, created_at, last_seen, paid_until, price`
 
 func scanNode(row scanner) (Node, error) {
 	var n Node
-	var created, seen int64
-	if err := row.Scan(&n.ID, &n.Name, &n.Host, &created, &seen); err != nil {
+	var created, seen, paid int64
+	if err := row.Scan(&n.ID, &n.Name, &n.Host, &created, &seen, &paid, &n.Price); err != nil {
 		return Node{}, err
 	}
 	n.CreatedAt = fromUnix(created)
 	if seen > 0 {
 		n.LastSeen = fromUnix(seen)
+	}
+	if paid > 0 {
+		t := fromUnix(paid)
+		n.PaidUntil = &t
 	}
 	return n, nil
 }
@@ -126,4 +132,20 @@ func (s *Store) WithNodeHosts(ctx context.Context, list []Inbound) []Inbound {
 		}
 	}
 	return list
+}
+
+// SetNodeBilling задаёт оплату VPS (paidUntil nil — не задано).
+func (s *Store) SetNodeBilling(ctx context.Context, id int64, paidUntil *time.Time, price string) error {
+	var p int64
+	if paidUntil != nil {
+		p = paidUntil.Unix()
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE nodes SET paid_until = ?, price = ? WHERE id = ?`, p, price, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

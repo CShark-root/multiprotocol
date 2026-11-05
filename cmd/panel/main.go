@@ -225,6 +225,8 @@ func serve(args []string) int {
 	go service.WatchAmnezia(ctx, amneziaRO, events)
 	notifier := service.NewNotifier(st, events, *dataDir, cfg.PublicHost, log)
 	go notifier.Run(ctx)
+	billingSvc := service.NewBilling(st, events, log)
+	go billingSvc.Run(ctx)
 	usersSvc := service.NewUsers(st, changed)
 	go service.NewBot(service.BotDeps{
 		Notifier: notifier, Users: usersSvc, Agent: localAgent, Nodes: nodesSvc, Reboot: rebootFunc(*dev), SubBase: subBase, Log: log,
@@ -246,6 +248,7 @@ func serve(args []string) int {
 		Routing:    routingSvc,
 		Cores:      coreUpdater,
 		Nodes:      nodesSvc,
+		Billing:    billingSvc,
 		CertPin:    certPin(*dev, *dataDir, cfg),
 		Reboot:     rebootFunc(*dev),
 		Panel:      api.PanelConfig{DataDir: *dataDir, Current: stored, Restart: restart},

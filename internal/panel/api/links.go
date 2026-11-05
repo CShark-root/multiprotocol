@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 	"regexp"
-	"strconv"
+	"time"
 	"strings"
 
 	"panel/internal/panel/config"
@@ -116,9 +116,10 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Profile-Title", subscription.ProfileTitle(u))
-		h.Set("Subscription-Userinfo", subscription.UserInfo(u))
-		h.Set("Profile-Update-Interval", strconv.Itoa(int(subscription.UpdateInterval.Hours())))
+		ss := subscription.DefaultSettings()
+		d.Store.GetSetting(r.Context(), subscription.SettingsKey, &ss)
+		ss.Headers(h, u)
+		d.Store.LogSubFetch(r.Context(), u.ID, r.UserAgent(), clientIP(r), time.Now())
 		if wantsSingBox(r) {
 			rs := routing.Defaults()
 			d.Store.GetSetting(r.Context(), "routing", &rs)

@@ -38,7 +38,8 @@ type Deps struct {
 	Routing    *service.Routing
 	Cores      *service.CoreUpdater // nil без локального агента
 	Nodes      *service.Nodes       // nil без локального агента
-	CertPin    string               // SHA-256 самоподписанного сертификата панели (hex); "" — сертификат от CA
+	Billing    *service.Billing
+	CertPin    string // SHA-256 самоподписанного сертификата панели (hex); "" — сертификат от CA
 	Domains    *service.Domains
 	Telegram   *service.Notifier
 	Amnezia    *amnezia.HelperClient // nil: no Amnezia tab data
@@ -104,11 +105,18 @@ func New(d Deps) http.Handler {
 				r.Delete("/nodes/{id}", s.deleteNode)
 				r.Post("/nodes/{id}/token", s.nodeToken)
 				r.Post("/nodes/{id}/restart", s.restartNode)
+				r.Put("/nodes/{id}/billing", s.saveNodeBilling)
+				r.Get("/system/billing", s.mainBilling)
+				r.Put("/system/billing", s.saveMainBilling)
+				r.Get("/settings/subscription", s.subSettings)
+				r.Put("/settings/subscription", s.saveSubSettings)
+				r.Get("/sub-fetches", s.lastFetches)
 				r.Put("/system/cores-auto", s.saveCoresAuto)
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/", s.listUsers)
 					r.Post("/", s.createUser)
 					r.Get("/{id}", s.getUser)
+					r.Get("/{id}/fetches", s.userFetches)
 					r.Put("/{id}", s.updateUser)
 					r.Delete("/{id}", s.deleteUser)
 					r.Get("/{id}/links", s.userLinks)

@@ -346,6 +346,8 @@ export type ServerNode = {
   id: number
   name: string
   host: string
+  paidUntil: string | null
+  price: string
   createdAt: string
   lastSeen: string
   online: boolean
@@ -494,6 +496,7 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `users/${id}`),
     links: (id: number) => request<UserLinks>('GET', `users/${id}/links`),
     traffic: (id: number, days = 30) => request<DayTraffic[]>('GET', `users/${id}/traffic?days=${days}`),
+    fetches: (id: number) => request<SubFetch[]>('GET', `users/${id}/fetches`),
     extend: (id: number, days: number) => request<User>('POST', `users/${id}/extend`, { days }),
     resetTraffic: (id: number) => request<User>('POST', `users/${id}/reset-traffic`, {}),
   },
@@ -515,4 +518,21 @@ export type CoresAuto = {
   settings?: { enabled: boolean; hour: number; lastCheck: string; lastError?: string }
   // Часы сервера: "15:42", пояс и смещение от UTC в минутах.
   clock?: { time: string; zone: string; offset: number }
+}
+
+// Одно обновление подписки: когда, каким приложением (User-Agent), с какого IP.
+export type SubFetch = { at: string; app: string; ip: string }
+
+// Что подписка сообщает приложению кроме подключений.
+export type SubSettings = { title: string; interval: number; announce: string; supportUrl: string }
+
+// Оплата VPS: до какого дня и сколько стоит.
+export type ServerBilling = { paidUntil: string | null; price: string }
+
+export const extras = {
+  subSettings: () => request<SubSettings>('GET', 'settings/subscription'),
+  saveSubSettings: (s: SubSettings) => request<SubSettings>('PUT', 'settings/subscription', s),
+  mainBilling: () => request<ServerBilling>('GET', 'system/billing'),
+  saveMainBilling: (paidUntil: string, price: string) => request<ServerBilling>('PUT', 'system/billing', { paidUntil, price }),
+  saveNodeBilling: (id: number, paidUntil: string, price: string) => request<ServerBilling>('PUT', `nodes/${id}/billing`, { paidUntil, price }),
 }

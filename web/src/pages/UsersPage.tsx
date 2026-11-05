@@ -448,6 +448,8 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
           </p>
         </div>
 
+        <SubFetches userId={user.id} />
+
         <div>
           <div className="text-sm font-medium">{t('users.traffic30')}</div>
           <div className="mt-2">{traffic.data ? <TrafficChart data={traffic.data} height={150} /> : <div className="h-[150px]" />}</div>
@@ -497,5 +499,39 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
         {(extend.isError || reset.isError) && <p className="text-sm text-destructive">{t('common.error')}</p>}
       </div>
     </Dialog>
+  )
+}
+
+// appName — название приложения из User-Agent: «v2RayTun/5.10», «Hiddify/2.5».
+function appName(ua: string) {
+  if (!ua) return '?'
+  return ua.split(/[\s;(]/)[0].slice(0, 40)
+}
+
+// SubFetches — когда и каким приложением пользователь обновлял подписку.
+function SubFetches({ userId }: { userId: number }) {
+  const { t, i18n } = useTranslation()
+  const q = useQuery({ queryKey: ['sub-fetches', userId], queryFn: () => api.users.fetches(userId) })
+  const list = q.data ?? []
+  return (
+    <div className="rounded-xl border p-3.5 text-sm">
+      <div className="font-medium">{t('users.fetches')}</div>
+      {list.length === 0 ? (
+        <p className="mt-1 text-xs text-muted-foreground">{q.isPending ? t('common.loading') : t('users.fetchesNone')}</p>
+      ) : (
+        <ul className="mt-1.5 space-y-1 text-xs">
+          {list.slice(0, 5).map((f, i) => (
+            <li key={i} className="flex flex-wrap justify-between gap-x-3 text-muted-foreground">
+              <span>
+                <span className="font-medium text-foreground">{appName(f.app)}</span> · {f.ip}
+              </span>
+              <span className="tabular-nums" title={f.app}>
+                {new Date(f.at).toLocaleString(i18n.language)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

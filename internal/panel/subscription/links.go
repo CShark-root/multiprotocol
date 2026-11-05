@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -216,3 +217,43 @@ func ProfileTitle(u store.User) string {
 
 // UpdateInterval is how often clients should refresh, in hours.
 const UpdateInterval = 12 * time.Hour
+
+// Settings — то, что подписка сообщает приложению кроме самих подключений.
+// Хранится в настройке "subscription".
+type Settings struct {
+	Title      string `json:"title"`      // имя профиля; "{name}" — имя пользователя; пусто — имя пользователя
+	Interval   int    `json:"interval"`   // часов между обновлениями, 1–168
+	Announce   string `json:"announce"`   // короткое объявление, если приложение умеет его показывать
+	SupportURL string `json:"supportUrl"` // куда писать за помощью (t.me/…, https://…)
+}
+
+const SettingsKey = "subscription"
+
+func DefaultSettings() Settings { return Settings{Interval: int(UpdateInterval.Hours())} }
+
+// Title — имя профиля для пользователя u.
+func (s Settings) TitleFor(u store.User) string {
+	t := strings.TrimSpace(s.Title)
+	if t == "" {
+		t = u.Name
+	}
+	t = strings.ReplaceAll(t, "{name}", u.Name)
+	return "base64:" + base64.StdEncoding.EncodeToString([]byte(t))
+}
+
+// Headers дописывает заголовки подписки.
+func (s Settings) Headers(h http.Header, u store.User) {
+	h.Set("Profile-Title", s.TitleFor(u))
+	h.Set("Subscription-Userinfo", UserInfo(u))
+	iv := s.Interval
+	if iv < 1 || iv > 168 {
+		iv = int(UpdateInterval.Hours())
+	}
+	h.Set("Profile-Update-Interval", strconv.Itoa(iv))
+	if a := strings.TrimSpace(s.Announce); a != "" {
+		h.Set("Announce", "base64:"+base64.StdEncoding.EncodeToString([]byte(a)))
+	}
+	if su := strings.TrimSpace(s.SupportURL); su != "" {
+		h.Set("Support-Url", su)
+	}
+}
