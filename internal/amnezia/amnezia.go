@@ -45,8 +45,9 @@ type Container struct {
 	CPU       float64   `json:"cpu"`   // percent of one core
 	MemBytes  uint64    `json:"memBytes"`
 	Clients   []Client  `json:"clients"`
-	Note      string    `json:"note,omitempty"` // why clients are missing
-	Managed   bool      `json:"managed"`        // the panel can add and remove its clients
+	Note      string    `json:"note,omitempty"`    // why clients are missing
+	Managed   bool      `json:"managed"`           // the panel can add and remove its clients
+	Version   string    `json:"version,omitempty"` // AmneziaWG protocol version, named as the app does
 }
 
 // Client is one access shared from the Amnezia app. Keys stay out: only
@@ -187,6 +188,13 @@ func Collect(ctx context.Context, socket string) Status {
 		if dc.State == "running" {
 			c.CPU, c.MemBytes = stats(ctx, d, dc.ID)
 			c.Clients, c.Note = clients(ctx, d, dc.ID, c.Kind)
+			if lay, ok := layouts[name]; ok {
+				if f, err := d.readFile(ctx, dc.ID, lay.conf); err == nil && f.exists {
+					if conf, err := parseConf(string(f.data)); err == nil {
+						c.Version = conf.Version()
+					}
+				}
+			}
 		}
 		st.Containers = append(st.Containers, c)
 	}

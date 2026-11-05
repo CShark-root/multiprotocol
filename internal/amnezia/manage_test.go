@@ -1,6 +1,7 @@
 package amnezia
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -97,5 +98,55 @@ func TestClientConfig(t *testing.T) {
 	}
 	if strings.Contains(cfg, "ListenPort") || strings.Contains(cfg, "SGVsbG9IZWxs") {
 		t.Errorf("server-only values leaked into the client config:\n%s", cfg)
+	}
+}
+
+func TestVersion(t *testing.T) {
+	c, _ := parseConf(appConf)
+	if v := c.Version(); v != "2" {
+		t.Errorf("H ranges: version %q, want 2", v)
+	}
+	c3, _ := parseConf(strings.Replace(appConf, "Jc = 4", "Jc = 4\nHeaderProtectionKey = abc", 1))
+	if v := c3.Version(); v != "3.1" {
+		t.Errorf("AWG 3 params: version %q, want 3.1", v)
+	}
+	c15, _ := parseConf(strings.NewReplacer("1100000001-1100000100", "11", "1200000001-1200000100", "12", "1300000001-1300000100", "13", "1400000001-1400000100", "14").Replace(appConf))
+	if v := c15.Version(); v != "1.5" {
+		t.Errorf("I1 only: version %q, want 1.5", v)
+	}
+}
+
+func TestVPNKeyRoundTrip(t *testing.T) {
+	c, _ := parseConf(appConf)
+	key, err := vpnKey(c, "[Interface]\nPrivateKey = x\n", clientData{
+		container: "amnezia-awg2", description: "MultiProtocol · Тест", host: "vpn.example.org", ip: "10.8.1.3",
+		priv: "p", pub: "P", serverPub: "S", psk: "K", dns: "1.1.1.1, 1.0.0.1", port: 34813,
+	})
+	if err != nil || !strings.HasPrefix(key, "vpn://") || strings.ContainsAny(key[6:], "+/=") {
+		t.Fatalf("key %q %v", key, err)
+	}
+	body, err := DecodeVPNKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Containers []struct {
+			Container string            `json:"container"`
+			AWG       map[string]string `json:"awg"`
+		} `json:"containers"`
+		Default string `json:"defaultContainer"`
+		Host    string `json:"hostName"`
+		DNS1    string `json:"dns1"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("%v\n%s", err, body)
+	}
+	a := doc.Containers[0].AWG
+	if doc.Default != "amnezia-awg2" || doc.Host != "vpn.example.org" || doc.DNS1 != "1.1.1.1" || a["port"] != "34813" || a["H1"] != "1100000001-1100000100" || a["I1"] != "<r 2><b 0x8580>" {
+		t.Errorf("decoded %s", body)
+	}
+	var last map[string]any
+	if err := json.Unmarshal([]byte(a["last_config"]), &last); err != nil || last["client_ip"] != "10.8.1.3" || last["port"] != float64(34813) {
+		t.Errorf("last_config %v %v", last, err)
 	}
 }

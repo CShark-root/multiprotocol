@@ -88,8 +88,8 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	out["pending"] = pending == nil
 	if b, err := os.ReadFile(filepath.Join(s.Panel.DataDir, "update.log")); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-		if len(lines) > 40 {
-			lines = lines[len(lines)-40:]
+		if len(lines) > 200 {
+			lines = lines[len(lines)-200:]
 		}
 		out["log"] = lines
 	}

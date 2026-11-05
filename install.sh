@@ -33,9 +33,11 @@ ASSET="multiprotocol-linux-$ARCH.tar.gz"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+echo "==> download"
 echo "Downloading $ASSET ($VERSION) from github.com/$REPO"
 curl -fsSL --retry 3 -o "$TMP/$ASSET" "$BASE/$ASSET"
 curl -fsSL --retry 3 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
+echo "==> verify"
 (cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null) || { echo "checksum mismatch, aborting" >&2; exit 1; }
 
 mkdir "$TMP/pkg"

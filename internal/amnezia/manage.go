@@ -15,11 +15,13 @@ import (
 	"archive/tar"
 	"bufio"
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -440,9 +442,11 @@ func tableIndex(list []map[string]any, key string) int {
 
 // AddedClient is what an added client needs to connect.
 type AddedClient struct {
-	Key    string `json:"key"`    // public key (the client id)
-	IP     string `json:"ip"`     // its address inside the tunnel
-	Config string `json:"config"` // AmneziaWG config to import in the app
+	Key     string `json:"key"`     // public key (the client id)
+	IP      string `json:"ip"`      // its address inside the tunnel
+	Config  string `json:"config"`  // AmneziaWG config (.conf), the "original format"
+	VPNKey  string `json:"vpnKey"`  // vpn:// key for the AmneziaVPN app
+	Version string `json:"version"` // AmneziaWG protocol version
 }
 
 type session struct {
@@ -699,7 +703,16 @@ func AddClient(ctx context.Context, socket string, p AddParams) (AddedClient, er
 	if _, err := s.d.container(ctx, "amnezia-dns"); err == nil {
 		dns = "172.29.172.254, 1.0.0.1" // AmneziaDNS, as the app uses it when installed
 	}
-	return AddedClient{Key: pub, IP: ip.String(), Config: clientConfig(conf, priv, ip, dns, serverPub, psk, p.Host, port)}, nil
+	cfg := clientConfig(conf, priv, ip, dns, serverPub, psk, p.Host, port)
+	// The app keeps MTU apart from the config text it stores.
+	key, err := vpnKey(conf, strings.Replace(cfg, "MTU = 1280\n", "", 1), clientData{
+		container: p.Container, description: "MultiProtocol · " + name, host: p.Host, ip: ip.String(), priv: priv, pub: pub,
+		serverPub: serverPub, psk: psk, dns: dns, port: port,
+	})
+	if err != nil {
+		return AddedClient{}, err
+	}
+	return AddedClient{Key: pub, IP: ip.String(), Config: cfg, VPNKey: key, Version: conf.Version()}, nil
 }
 
 // Interface keys a client gets from the server: the obfuscation settings
@@ -864,4 +877,123 @@ func RenameClient(ctx context.Context, socket string, p KeyParams) error {
 	}
 	table[i]["userData"] = ud
 	return s.commit(ctx, confF, tableF, nil, tableJSON(table), nil)
+}
+
+// ---- AmneziaWG version and the AmneziaVPN key ----
+
+var awg3Keys = []string{"HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts"}
+
+// value of an [Interface] key, set or kept in a comment by the app.
+func (c awgConf) value(k string) string {
+	if v, ok := c.iface[k]; ok {
+		return v
+	}
+	return c.iface["#"+k]
+}
+
+// Version names the AmneziaWG protocol version the way the Amnezia app does
+// (AwgProtocolConfig::awgVersionOf): "3.1", "2", "1.5" or "1".
+func (c awgConf) Version() string {
+	on := func(k string) bool {
+		v := strings.TrimSpace(c.value(k))
+		return v != "" && !strings.EqualFold(v, "off")
+	}
+	for _, k := range awg3Keys {
+		if strings.TrimSpace(c.value(k)) != "" {
+			return "3.1"
+		}
+	}
+	if on("RandomTrailers") || on("DisableCookies") {
+		return "3.1"
+	}
+	if c.value("S3") != "" || c.value("S4") != "" {
+		return "2"
+	}
+	for _, k := range []string{"H1", "H2", "H3", "H4"} {
+		if strings.Contains(c.value(k), "-") {
+			return "2"
+		}
+	}
+	for _, k := range []string{"I1", "I2", "I3", "I4", "I5"} {
+		if c.value(k) != "" {
+			return "1.5"
+		}
+	}
+	return "1"
+}
+
+// vpnKey builds the "vpn://" key the AmneziaVPN app exports for one
+// connection (ExportController::generateConnectionConfig): the server JSON
+// with this container and its client config, zlib-compressed the Qt way
+// (qCompress: 4-byte big-endian length, then zlib) and base64url-encoded.
+func vpnKey(c awgConf, native string, cl clientData) (string, error) {
+	params := map[string]any{}
+	for _, k := range clientKeys {
+		if v := c.value(k); v != "" {
+			params[k] = v
+		}
+	}
+	client := map[string]any{
+		"config": native, "hostName": cl.host, "port": cl.port, "client_ip": cl.ip,
+		"client_priv_key": cl.priv, "client_pub_key": cl.pub, "server_pub_key": cl.serverPub, "psk_key": cl.psk,
+		"clientId": cl.pub, "allowed_ips": []string{"0.0.0.0/0", "::/0"}, "persistent_keep_alive": "25", "mtu": "1280",
+	}
+	server := map[string]any{
+		"port": strconv.Itoa(cl.port), "transport_proto": "udp", "subnet_address": c.subnet.Masked().Addr().String(),
+	}
+	for k, v := range params {
+		client[k], server[k] = v, v
+	}
+	for _, k := range []string{"I1", "I2", "I3", "I4", "I5"} {
+		if _, ok := server[k]; !ok {
+			server[k] = "" // the app always writes these
+		}
+	}
+	last, err := json.Marshal(client)
+	if err != nil {
+		return "", err
+	}
+	server["last_config"] = string(last)
+	dns := strings.Split(cl.dns, ",")
+	doc := map[string]any{
+		"format_version":   1,
+		"description":      cl.description,
+		"hostName":         cl.host,
+		"containers":       []any{map[string]any{"container": cl.container, "awg": server}},
+		"defaultContainer": cl.container,
+		"dns1":             strings.TrimSpace(dns[0]),
+	}
+	if len(dns) > 1 {
+		doc["dns2"] = strings.TrimSpace(dns[1])
+	}
+	body, err := json.MarshalIndent(doc, "", "    ")
+	if err != nil {
+		return "", err
+	}
+	var z bytes.Buffer
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(body)))
+	z.Write(n[:])
+	zw, _ := zlib.NewWriterLevel(&z, 8)
+	zw.Write(body)
+	zw.Close()
+	return "vpn://" + base64.RawURLEncoding.EncodeToString(z.Bytes()), nil
+}
+
+type clientData struct {
+	container, description, host, ip, priv, pub, serverPub, psk, dns string
+	port                                                             int
+}
+
+// DecodeVPNKey reverses vpnKey (for tests and for reading keys back).
+func DecodeVPNKey(key string) ([]byte, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimPrefix(key, "vpn://"), "="))
+	if err != nil || len(raw) < 4 {
+		return nil, errors.New("not a vpn:// key")
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(raw[4:]))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(zr, 1<<20))
 }

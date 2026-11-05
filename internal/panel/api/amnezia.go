@@ -98,13 +98,13 @@ func (s *server) addAmneziaClient(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		in2 := service.UserInput{
 			Name: user.Name, Note: user.Note, Enabled: user.Enabled, TrafficLimit: user.TrafficLimit, ResetPeriod: user.ResetPeriod,
-			ExpireAt: user.ExpireAt, AmneziaKey: nc.Config, SubHidden: user.SubHidden,
+			ExpireAt: user.ExpireAt, AmneziaKey: nc.VPNKey, SubHidden: user.SubHidden,
 		}
 		if _, err := s.Users.Update(r.Context(), admin, user.ID, in2); err == nil {
 			saved = true
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"key": nc.Key, "ip": nc.IP, "config": nc.Config, "savedToUser": saved})
+	writeJSON(w, http.StatusOK, map[string]any{"key": nc.Key, "ip": nc.IP, "config": nc.Config, "vpnKey": nc.VPNKey, "version": nc.Version, "savedToUser": saved})
 }
 
 func (s *server) changeAmneziaClient(action string) http.HandlerFunc {

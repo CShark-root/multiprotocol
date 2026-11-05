@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
@@ -727,20 +727,63 @@ function UpdateCard() {
     mutationFn: () => api.update.status(true),
     onSuccess: (d) => qc.setQueryData(['update'], d),
   })
+  const [startedAt, setStartedAt] = useState(0)
+  const [withCores, setWithCores] = useState(false)
+  const [doneTo, setDoneTo] = useState<string | null>(null)
+  const [result, setResult] = useState<'ok' | 'failed' | null>(null)
+  const [, tick] = useState(0)
+  // Shown once after the page reloads into the new version.
+  const [justUpdated] = useState(() => {
+    try {
+      const v = sessionStorage.getItem('mp.updated')
+      sessionStorage.removeItem('mp.updated')
+      return v
+    } catch {
+      return null
+    }
+  })
   const start = useMutation({
     mutationFn: (cores: boolean) => api.update.start(cores),
-    onSuccess: () => setStarted(q.data?.current ?? ''),
+    onMutate: (cores) => {
+      setStartedAt(Date.now())
+      setWithCores(cores)
+    },
+    onSuccess: () => {
+      setResult(null)
+      setStarted(q.data?.current ?? '')
+      q.refetch()
+    },
   })
 
   const d = q.data
   const log = d?.log ?? []
   const last = log.length ? log[log.length - 1] : ''
   const finished = /== .*(done|failed)$/.test(last)
+  const busy = started !== null || start.isPending
+  useEffect(() => {
+    if (!busy) return
+    const id = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [busy])
   useEffect(() => {
     if (started === null || !d || d.pending) return
-    if (d.current !== started) window.location.reload() // the new version answered
-    else if (finished) setStarted(null) // same version (reinstall, cores only, or a failure)
-  }, [d, started, finished])
+    if (d.current !== started) {
+      // The new version answered: say so, then load its pages.
+      setDoneTo(d.current)
+      try {
+        sessionStorage.setItem('mp.updated', `${started} → ${d.current}`)
+      } catch {
+        /* the banner after reload is a nicety */
+      }
+      const id = setTimeout(() => window.location.reload(), 2500)
+      return () => clearTimeout(id)
+    }
+    if (finished && Date.now() - startedAt > 5000) {
+      // Same version: a reinstall, cores only, or a failure.
+      setResult(last.endsWith('done') ? 'ok' : 'failed')
+      setStarted(null)
+    }
+  }, [d, started, finished, startedAt, last])
 
   if (!d)
     return (
@@ -750,7 +793,20 @@ function UpdateCard() {
     )
   const latest = d.latest?.tag
   const newer = Boolean(latest && latest !== d.current)
-  const busy = started !== null
+  // Stages from the "==> step" lines of this run's log.
+  // Until the updater picks the request up, the log is the previous run's.
+  const runLog = busy && (start.isPending || d.pending) ? [] : log
+  const seen = new Set(runLog.filter((l) => l.startsWith('==> ')).map((l) => l.slice(4).trim()))
+  const panelDown = busy && (q.isError || q.failureCount > 0)
+  const steps = ['queued', 'download', 'verify', 'install', ...(withCores ? ['cores'] : []), 'restart', 'back'] as const
+  const hit = (s: string) =>
+    s === 'queued' ? started !== null && !d.pending : s === 'back' ? doneTo !== null : seen.has(s) || (s === 'restart' && panelDown)
+  // A later stage implies the earlier ones (an older installer marks fewer).
+  const lastHit = steps.reduce((m, s, i) => (hit(s) ? i : m), -1)
+  const reached = (s: string) => steps.indexOf(s as (typeof steps)[number]) <= lastHit
+  const current = lastHit + 1
+  const failedRun = started !== null && finished && last.endsWith('failed')
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0
   // "== 2026-11-05T10:00:00+03:00 update started (cores: 0)" … "== … done"
   const lastAt = /^== (\S+)/.exec(log[0] ?? '')?.[1]
   const lastOk = last.endsWith('done')
@@ -784,10 +840,45 @@ function UpdateCard() {
           </div>
         </div>
 
+        {result && !busy && (
+          <p className={'rounded-xl px-3.5 py-2.5 text-sm ' + (result === 'ok' ? 'bg-success-soft text-success' : 'bg-destructive/10 text-destructive')}>
+            {result === 'ok' ? t('update.resultOk') : t('update.failedRun')}
+          </p>
+        )}
+        {justUpdated && !busy && (
+          <div className="flex items-center gap-2 rounded-xl bg-success-soft px-3.5 py-2.5 text-sm text-success">
+            <Check className="h-4 w-4" />
+            {t('update.justUpdated', { versions: justUpdated })}
+          </div>
+        )}
         {busy ? (
-          <div className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-sm text-accent-foreground">
-            <RefreshCw className="h-4 w-4 animate-spin" />
-            {t('update.running')}
+          <div className="space-y-3 rounded-xl border p-3.5">
+            <div className="flex items-center justify-between gap-2 text-sm font-medium">
+              <span>{doneTo ? t('update.doneTo', { version: doneTo }) : failedRun ? t('update.failedRun') : t('update.running')}</span>
+              <span className="tabular-nums text-xs text-muted-foreground">{elapsed} c</span>
+            </div>
+            <ol className="space-y-1.5">
+              {steps.map((s, i) => {
+                const ok = reached(s)
+                const now = i === current && !failedRun
+                return (
+                  <li key={s} className={'flex items-center gap-2 text-sm ' + (ok || now ? '' : 'text-muted-foreground')}>
+                    {ok ? (
+                      <Check className="h-4 w-4 text-success" />
+                    ) : now ? (
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                    ) : (
+                      <span className="mx-1.5 h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+                    )}
+                    {t(`update.step.${s}`)}
+                  </li>
+                )
+              })}
+            </ol>
+            {panelDown && !doneTo && <p className="text-xs text-muted-foreground">{t('update.restarting')}</p>}
+            {runLog.length > 0 && (
+              <pre className="max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-[11px] text-foreground">{runLog.filter((l) => !l.startsWith('==> ')).slice(-12).join('\n')}</pre>
+            )}
           </div>
         ) : (
           newer && (

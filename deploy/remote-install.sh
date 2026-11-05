@@ -23,6 +23,7 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH=arm64 ;;
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
+echo "==> install"
 install -m 0755 "$SRC/panel-linux-$ARCH" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 install -m 0644 "$SRC/panel-amnezia.service" /etc/systemd/system/panel-amnezia.service
@@ -37,6 +38,7 @@ install -m 0755 "$SRC/panel-update.sh" /usr/local/lib/panel/panel-update.sh
 install -m 0644 "$SRC/panel-update.service" /etc/systemd/system/panel-update.service
 install -m 0644 "$SRC/panel-update.path" /etc/systemd/system/panel-update.path
 [[ -f $SRC/install.sh ]] && install -m 0755 "$SRC/install.sh" /usr/local/lib/panel/install.sh
+echo "==> cores"
 for core in xray hysteria sing-box; do
   bin=/usr/local/lib/panel/$core/$core
   if [[ ! -x $bin || "${UPDATE_CORES:-0}" == 1 ]]; then
@@ -82,11 +84,12 @@ polkit.addRule(function (action, subject) {
 RULES
 fi
 
+echo "==> restart"
 systemctl daemon-reload
 systemctl enable panel panel-amnezia panel-net panel-update.path >/dev/null 2>&1
 systemctl restart panel-net
 systemctl start panel-update.path
-# The Amnezia tab helper only reads Docker; Docker itself is left alone.
+# The Amnezia helper never changes Docker itself.
 systemctl restart panel-amnezia
 systemctl restart panel
 sleep 2

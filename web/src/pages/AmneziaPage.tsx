@@ -86,7 +86,10 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold">{kindNames[c.kind] ?? c.kind}</h2>
+            <h2 className="font-semibold">
+              {kindNames[c.kind] ?? c.kind}
+              {c.version && c.version !== '1' && ` ${c.version}`}
+            </h2>
             <Badge tone={running ? 'success' : 'danger'}>{running ? t('amnezia.running') : c.state}</Badge>
           </div>
           <div className="mt-0.5 font-mono text-xs text-muted-foreground">{c.name}</div>
@@ -224,6 +227,7 @@ function AddClientDialog({ container, onClose }: { container: string; onClose: (
       {add.data ? (
         <div className="space-y-3">
           <p className="text-sm">{t('amnezia.added', { ip: add.data.ip })}</p>
+          <ShareRow label={t('amnezia.vpnKeyLabel')} hint={t('amnezia.vpnKeyHint')} text={add.data.vpnKey} />
           <ShareRow label={t('amnezia.configLabel')} hint={t('amnezia.configHint')} text={add.data.config} />
           <Button
             variant="secondary"

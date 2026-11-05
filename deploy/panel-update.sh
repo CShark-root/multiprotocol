@@ -4,6 +4,9 @@
 # runs the same one-line installer an admin would: the latest release,
 # checksum-verified. The request file holds options, one per line; only
 # "cores=1" is understood, anything else is ignored.
+#
+# The log is written as it goes (the panel shows it live); "==> step" lines
+# mark the stages.
 set -uo pipefail
 REQ=/var/lib/panel/update-request
 LOG=/var/lib/panel/update.log
@@ -11,6 +14,9 @@ LOG=/var/lib/panel/update.log
 cores=0
 grep -qx 'cores=1' "$REQ" && cores=1
 rm -f "$REQ"
+: >"$LOG"
+chown panel:panel "$LOG"
+chmod 0640 "$LOG"
 {
   echo "== $(date -Is) update started (cores: $cores)"
   if UPDATE_CORES=$cores bash /usr/local/lib/panel/install.sh; then
@@ -18,7 +24,4 @@ rm -f "$REQ"
   else
     echo "== $(date -Is) failed"
   fi
-} >"$LOG.new" 2>&1
-mv "$LOG.new" "$LOG"
-chown panel:panel "$LOG"
-chmod 0640 "$LOG"
+} >>"$LOG" 2>&1

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
 	"panel/internal/panel/telegram"
 )
@@ -249,7 +251,8 @@ func (b *Bot) mainScreen(ctx context.Context) (string, telegram.Keyboard) {
 				active++
 			}
 		}
-		fmt.Fprintf(&sb, "👥 Пользователи: %d активных из %d", active, len(list))
+		fmt.Fprintf(&sb, "👥 Сейчас подключены: %s\n", b.onlineNames(ctx, list))
+		fmt.Fprintf(&sb, "Учёток: %d, из них с действующим доступом %d", len(list), active)
 	}
 	kb := telegram.Keyboard{
 		{btn("👥 Пользователи", "u:0"), btn("🔄 Обновить", "m")},
@@ -350,4 +353,31 @@ func uptime(s int64) string {
 		return fmt.Sprintf("%d дн. %d ч", days, int(d.Hours())%24)
 	}
 	return fmt.Sprintf("%d ч %d мин", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// onlineNames lists who is connected right now, as the panel's online
+// marks do.
+func (b *Bot) onlineNames(ctx context.Context, list []store.User) string {
+	if b.d.Agent == nil {
+		return "—"
+	}
+	m, _ := b.d.Agent.Online(ctx)
+	names := map[int64]string{}
+	for _, u := range list {
+		names[u.ID] = u.Name
+	}
+	var on []string
+	for email, e := range m {
+		if e.Connections == 0 && len(e.IPs) == 0 {
+			continue
+		}
+		if id, ok := compile.UserIDFromEmail(email); ok && names[id] != "" {
+			on = append(on, names[id])
+		}
+	}
+	if len(on) == 0 {
+		return "никого"
+	}
+	slices.Sort(on)
+	return fmt.Sprintf("%d (%s)", len(on), strings.Join(on, ", "))
 }
