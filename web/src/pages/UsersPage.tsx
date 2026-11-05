@@ -5,7 +5,7 @@ import { Ban, CalendarPlus, ChevronLeft, ChevronRight, CircleCheck, Clock, Gauge
 import { ApiError, api, type OnlineEntry, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
 import { GiB, cn, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, RowMenu, Select, Switch, UsageRing } from '@/components/ui'
-import { useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ShareRow } from '@/components/share'
 import { TrafficChart } from '@/components/TrafficChart'
 import { useKindLabel } from './InboundsPage'
@@ -33,6 +33,7 @@ export function UsersPage() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
   const search = useSearch({ strict: false }) as { user?: number }
+  const navigate = useNavigate()
   const [editing, setEditing] = useState<User | 'new' | null>(null)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [connecting, setConnecting] = useState<User | null>(null)
@@ -196,7 +197,11 @@ export function UsersPage() {
         <UserDetails
           user={users.data?.find((u) => u.id === details.id) ?? details}
           online={onlineBy.get(details.id)}
-          onClose={() => setDetails(null)}
+          onClose={() => {
+            setDetails(null)
+            // Убираем ?user=…, чтобы карточка не открылась снова после обновления страницы.
+            if (search.user) navigate({ to: '/users', search: {}, replace: true })
+          }}
           onEdit={() => {
             setEditing(users.data?.find((u) => u.id === details.id) ?? details)
             setDetails(null)
