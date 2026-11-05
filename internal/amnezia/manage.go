@@ -997,3 +997,76 @@ func DecodeVPNKey(key string) ([]byte, error) {
 	}
 	return io.ReadAll(io.LimitReader(zr, 1<<20))
 }
+
+// PauseParams — клиенты, которых панель держит выключенными (у их
+// пользователя кончился срок или трафик, или он выключен).
+type PauseParams struct {
+	Container string   `json:"container"`
+	Keys      []string `json:"keys"`
+}
+
+type PauseResult struct {
+	Paused   int `json:"paused"`   // убрано с интерфейса сейчас
+	Restored int `json:"restored"` // возвращено из awg0.conf
+}
+
+// SetPaused приводит работающий интерфейс к виду «все клиенты из awg0.conf,
+// кроме Keys». Файлы не меняются: приложение Amnezia по-прежнему видит всех
+// клиентов, а после перезапуска контейнера или правки из приложения панель
+// за минуту снова уберёт выключенных.
+func SetPaused(ctx context.Context, socket string, p PauseParams) (PauseResult, error) {
+	manageMu.Lock()
+	defer manageMu.Unlock()
+	var res PauseResult
+	paused := map[string]bool{}
+	for _, k := range p.Keys {
+		if !validKey(k) {
+			return res, errors.New("неверный ключ клиента")
+		}
+		paused[k] = true
+	}
+	s, err := open(ctx, socket, p.Container)
+	if err != nil {
+		return res, err
+	}
+	confF, err := s.d.readFile(ctx, s.id, s.lay.conf)
+	if err != nil {
+		return res, err
+	}
+	conf, err := parseConf(string(confF.data))
+	if err != nil {
+		return res, fmt.Errorf("%w — менять не буду", err)
+	}
+	live, err := s.livePeers(ctx)
+	if err != nil {
+		return res, err
+	}
+	// Кто-то включённый пропал с интерфейса — возвращаем всех из файла.
+	for _, peer := range conf.peers {
+		if !paused[peer.key] && !live[peer.key] {
+			res.Restored++
+		}
+	}
+	if res.Restored > 0 {
+		if err := s.sync(ctx); err != nil {
+			return res, err
+		}
+		if live, err = s.livePeers(ctx); err != nil {
+			return res, err
+		}
+	}
+	for k := range paused {
+		if !live[k] {
+			continue
+		}
+		out, code, err := s.d.run(ctx, s.id, []string{s.lay.bin, "set", s.lay.iface, "peer", k, "remove"})
+		if err != nil {
+			return res, err
+		}
+		if code != 0 {
+			return res, fmt.Errorf("%s set: %s", s.lay.bin, strings.TrimSpace(out))
+		}
+		res.Paused++
+	}
+	return res, nil
+}

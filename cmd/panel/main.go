@@ -170,6 +170,9 @@ func serve(args []string) int {
 		if !*dev && runtime.GOOS == "linux" {
 			syncer.SetHops(nethelper.NewClient(nethelper.Socket))
 		}
+		if a := amneziaClient(*dev); a != nil {
+			syncer.SetAmnezia(a)
+		}
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)
 		go routingSvc.RunWarpWatch(ctx, func() error { return localAgent.RestartCore("xray") })

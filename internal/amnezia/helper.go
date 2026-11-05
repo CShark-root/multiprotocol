@@ -102,6 +102,29 @@ func Serve(ctx context.Context, socket, dockerSocket string, gid int, log *slog.
 		var p KeyParams
 		change(w, r, &p, func(c context.Context) (any, error) { return struct{}{}, RenameClient(c, dockerSocket, p) })
 	})
+	// Раз в минуту от панели: держит выключенных клиентов вне интерфейса.
+	// Пишет в журнал и сбрасывает кэш, только когда что-то изменилось.
+	mux.HandleFunc("POST /clients/paused", func(w http.ResponseWriter, r *http.Request) {
+		var p PauseParams
+		if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&p); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		c, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		res, err := SetPaused(c, dockerSocket, p)
+		if res.Paused+res.Restored > 0 {
+			mu.Lock()
+			cached = Status{}
+			mu.Unlock()
+			log.Info("amnezia paused clients", "container", p.Container, "paused", res.Paused, "restored", res.Restored)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		writeJSON(w, res)
+	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -219,4 +242,11 @@ func (c *HelperClient) RemoveClient(ctx context.Context, p KeyParams) error {
 
 func (c *HelperClient) RenameClient(ctx context.Context, p KeyParams) error {
 	return c.post(ctx, "/clients/rename", p, nil)
+}
+
+// SetPaused держит клиентов Keys выключенными на работающем интерфейсе.
+func (c *HelperClient) SetPaused(ctx context.Context, p PauseParams) (PauseResult, error) {
+	var res PauseResult
+	err := c.post(ctx, "/clients/paused", p, &res)
+	return res, err
 }

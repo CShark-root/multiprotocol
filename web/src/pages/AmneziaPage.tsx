@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, Download, Info, Pencil, Plus, ScrollText, Shield, Trash2 } from 'lucide-react'
-import { ApiError, api, type AmneziaClient, type AmneziaContainer } from '@/lib/api'
+import { Boxes, Download, Info, Link2, Pencil, Plus, ScrollText, Shield, Trash2 } from 'lucide-react'
+import { ApiError, api, type AmneziaClient, type AmneziaContainer, type AmneziaLink, type User } from '@/lib/api'
 import { formatBytes, formatDuration } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select } from '@/components/ui'
 import { ShareRow } from '@/components/share'
@@ -37,6 +37,7 @@ export function AmneziaPage() {
   const { t } = useTranslation()
   const q = useQuery({ queryKey: ['amnezia'], queryFn: api.amnezia.status, refetchInterval: 10_000 })
   const [logsOf, setLogsOf] = useState<string | null>(null)
+  const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
   const st = q.data?.status
 
   return (
@@ -65,7 +66,7 @@ export function AmneziaPage() {
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           {st.containers.map((c) => (
-            <ContainerCard key={c.name} c={c} onLogs={() => setLogsOf(c.name)} />
+            <ContainerCard key={c.name} c={c} links={q.data.links ?? []} users={users.data ?? []} onLogs={() => setLogsOf(c.name)} />
           ))}
         </div>
       )}
@@ -74,9 +75,14 @@ export function AmneziaPage() {
   )
 }
 
-function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void }) {
+function ContainerCard({ c, links, users, onLogs }: { c: AmneziaContainer; links: AmneziaLink[]; users: User[]; onLogs: () => void }) {
   const [adding, setAdding] = useState(false)
-  const [action, setAction] = useState<{ client: AmneziaClient; mode: "rename" | "remove" } | null>(null)
+  const [action, setAction] = useState<{ client: AmneziaClient; mode: 'rename' | 'remove' | 'link' } | null>(null)
+  // Чей клиент: пользователь панели, к которому он привязан.
+  const ownerOf = (key: string) => {
+    const l = links.find((x) => x.container === c.name && x.key === key)
+    return l ? users.find((u) => u.id === l.userId) : undefined
+  }
   const { t, i18n } = useTranslation()
   const lng = i18n.language
   const running = c.state === 'running'
@@ -131,12 +137,14 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
               <tbody>
                 {c.clients.map((cl) => {
                   const online = cl.lastHandshake && Date.now() - new Date(cl.lastHandshake).getTime() < 180_000
+                  const owner = ownerOf(cl.key)
                   return (
                     <tr key={cl.id} className="border-t">
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <span className={'h-2 w-2 shrink-0 rounded-full ' + (online ? 'bg-success' : 'border border-muted-foreground/50')} />
                           <span className="font-medium">{cl.name || t('amnezia.unnamed')}</span>
+                          {owner && <Badge tone={owner.status === 'active' ? 'accent' : 'warning'}>{owner.name}{owner.status !== 'active' ? ' · ' + t('amnezia.paused') : ''}</Badge>}
                         </div>
                         <div className="font-mono text-[11px] text-muted-foreground">
                           {cl.id}
@@ -150,6 +158,9 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
                       {c.managed && (
                         <td className="px-1 py-2">
                           <div className="flex justify-end">
+                            <Button size="icon" variant="ghost" aria-label={t('amnezia.linkTitle')} title={t('amnezia.linkTitle')} onClick={() => setAction({ client: cl, mode: 'link' })}>
+                              <Link2 className="h-4 w-4" />
+                            </Button>
                             <Button size="icon" variant="ghost" aria-label={t('amnezia.renameTitle')} onClick={() => setAction({ client: cl, mode: 'rename' })}>
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -171,7 +182,10 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
         {c.image}
       </p>
       {adding && <AddClientDialog container={c.name} onClose={() => setAdding(false)} />}
-      {action && <ClientActionDialog container={c.name} client={action.client} mode={action.mode} onClose={() => setAction(null)} />}
+      {action && action.mode === 'link' && (
+        <LinkDialog container={c.name} client={action.client} users={users} current={ownerOf(action.client.key)?.id ?? 0} onClose={() => setAction(null)} />
+      )}
+      {action && action.mode !== 'link' && <ClientActionDialog container={c.name} client={action.client} mode={action.mode} onClose={() => setAction(null)} />}
     </Card>
   )
 }
@@ -324,6 +338,57 @@ function ClientActionDialog({ container, client, mode, onClose }: { container: s
           </Button>
           <Button type="submit" variant={mode === 'remove' ? 'danger' : 'primary'} disabled={m.isPending}>
             {m.isPending ? t('amnezia.working') : mode === 'remove' ? t('amnezia.remove') : t('common.save')}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+// LinkDialog привязывает клиента к пользователю: его срок и лимит трафика
+// начинают действовать и на этого клиента, трафик идёт в его статистику.
+function LinkDialog({ container, client, users, current, onClose }: { container: string; client: AmneziaClient; users: User[]; current: number; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [userId, setUserId] = useState(current)
+  const m = useMutation({
+    mutationFn: () => api.amnezia.linkClient(container, client.key, userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['amnezia'] })
+      onClose()
+    },
+  })
+  const err = m.error instanceof ApiError ? m.error.message : m.error ? t('common.error') : ''
+  return (
+    <Dialog open onClose={onClose} title={t('amnezia.linkTitle')}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          m.mutate()
+        }}
+      >
+        <p className="text-sm font-medium">{client.name || client.id}</p>
+        <Field label={t('amnezia.linkUser')}>
+          {(id) => (
+            <Select id={id} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
+              <option value={0}>{t('amnezia.noUser')}</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <p className="text-xs text-muted-foreground">{t('amnezia.linkText')}</p>
+        {err && <p className="text-sm text-destructive">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" disabled={m.isPending || userId === current}>
+            {t('common.save')}
           </Button>
         </div>
       </form>

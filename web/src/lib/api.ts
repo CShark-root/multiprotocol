@@ -142,6 +142,8 @@ export type DomainInfo = {
   terms: string
 }
 
+// Клиент AmneziaWG, привязанный к пользователю панели.
+export type AmneziaLink = { container: string; key: string; userId: number }
 export type AmneziaClient = { name: string; id: string; key: string; created?: string; lastHandshake?: string; endpoint?: string; rxBytes: number; txBytes: number }
 export type AmneziaContainer = {
   name: string
@@ -408,12 +410,13 @@ export const api = {
     remove: () => request<DomainInfo>('DELETE', 'domain'),
   },
   amnezia: {
-    status: () => request<{ helper: boolean; status?: { docker: boolean; containers: AmneziaContainer[]; checkedAt: string } }>('GET', 'amnezia'),
+    status: () => request<{ helper: boolean; status?: { docker: boolean; containers: AmneziaContainer[]; checkedAt: string }; links?: AmneziaLink[] }>('GET', 'amnezia'),
     logs: (name: string) => request<string[]>('GET', 'amnezia/logs?tail=300&name=' + encodeURIComponent(name)),
     addClient: (container: string, name: string, userId: number) =>
       request<{ key: string; ip: string; config: string; vpnKey: string; version: string; savedToUser: boolean }>('POST', 'amnezia/clients', { container, name, userId }),
     removeClient: (container: string, key: string) => request<void>('POST', 'amnezia/clients/remove', { container, key }),
     renameClient: (container: string, key: string, name: string) => request<void>('POST', 'amnezia/clients/rename', { container, key, name }),
+    linkClient: (container: string, key: string, userId: number) => request<void>('POST', 'amnezia/clients/link', { container, key, userId }),
   },
   update: {
     status: (check: boolean) =>

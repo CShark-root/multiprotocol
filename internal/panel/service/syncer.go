@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/amnezia"
 	"panel/internal/nethelper"
 	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
@@ -39,6 +40,9 @@ type Syncer struct {
 	// sync goroutine touches these.
 	userStatus map[int64]Status
 	coreDown   map[string]bool
+
+	amnezia     AmneziaClients  // nil: без связки с Amnezia
+	amneziaSeen *amnezia.Status // что помощник показал в этом круге
 }
 
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {
@@ -95,6 +99,9 @@ func (s *Syncer) sync(ctx context.Context) {
 	// Traffic first: counters reset when a core restarts with a new config.
 	if err := s.collect(ctx); err != nil {
 		s.log.Warn("collect traffic", "err", err)
+	}
+	if err := s.collectAmnezia(ctx); err != nil {
+		s.log.Warn("collect amnezia traffic", "err", err)
 	}
 	err := s.apply(ctx)
 	if err != nil {
@@ -191,6 +198,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 		}
 	}
 	s.recordUserChanges(ctx, users, statuses)
+	s.applyAmnezia(ctx, statuses)
 	rt := compile.DefaultRouting()
 	if s.routing != nil {
 		if rt, err = s.routing.Compile(ctx); err != nil {

@@ -109,6 +109,7 @@ func New(d Deps) http.Handler {
 				r.Post("/amnezia/clients", s.addAmneziaClient)
 				r.Post("/amnezia/clients/remove", s.changeAmneziaClient("remove"))
 				r.Post("/amnezia/clients/rename", s.changeAmneziaClient("rename"))
+				r.Post("/amnezia/clients/link", s.linkAmneziaClient)
 				r.Get("/telegram", s.getTelegram)
 				r.Put("/telegram", s.saveTelegram)
 				r.Post("/telegram/find-chat", s.findTelegramChat)
