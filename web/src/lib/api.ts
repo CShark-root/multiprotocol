@@ -142,7 +142,7 @@ export type DomainInfo = {
   terms: string
 }
 
-export type AmneziaClient = { name: string; id: string; created?: string; lastHandshake?: string; endpoint?: string; rxBytes: number; txBytes: number }
+export type AmneziaClient = { name: string; id: string; key: string; created?: string; lastHandshake?: string; endpoint?: string; rxBytes: number; txBytes: number }
 export type AmneziaContainer = {
   name: string
   kind: string
@@ -155,6 +155,7 @@ export type AmneziaContainer = {
   memBytes: number
   clients: AmneziaClient[]
   note?: string
+  managed: boolean
 }
 
 export type TelegramInfo = {
@@ -408,6 +409,10 @@ export const api = {
   amnezia: {
     status: () => request<{ helper: boolean; status?: { docker: boolean; containers: AmneziaContainer[]; checkedAt: string } }>('GET', 'amnezia'),
     logs: (name: string) => request<string[]>('GET', 'amnezia/logs?tail=300&name=' + encodeURIComponent(name)),
+    addClient: (container: string, name: string, userId: number) =>
+      request<{ key: string; ip: string; config: string; savedToUser: boolean }>('POST', 'amnezia/clients', { container, name, userId }),
+    removeClient: (container: string, key: string) => request<void>('POST', 'amnezia/clients/remove', { container, key }),
+    renameClient: (container: string, key: string, name: string) => request<void>('POST', 'amnezia/clients/rename', { container, key, name }),
   },
   update: {
     status: (check: boolean) =>

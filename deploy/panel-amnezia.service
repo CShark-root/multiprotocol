@@ -1,19 +1,24 @@
 [Unit]
-Description=panel - read-only view of the Amnezia containers
+Description=panel - Amnezia containers: status, logs and AmneziaWG clients
 After=docker.service
 # The panel works without it; it only feeds the Amnezia tab.
 
 [Service]
 # Docker's socket is root-only (root-equivalent), so this small helper runs
-# as root instead of giving the panel user Docker access. It answers two
-# fixed read-only questions over /run/panel-amnezia/helper.sock (group
-# panel): container status and container logs. It never starts, stops,
-# changes or removes anything.
+# as root instead of giving the panel user Docker access. It answers a fixed
+# set of requests over /run/panel-amnezia/helper.sock (group panel):
+# container status and logs, and adding, removing or renaming AmneziaWG
+# clients the way the Amnezia app does (awg0.conf + clientsTable + awg
+# syncconf). It never starts, stops, rebuilds or removes a container, and
+# keeps a copy of the files before every change in
+# /var/lib/panel-amnezia/backups.
 ExecStart=/usr/local/bin/panel amnezia-helper
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=panel-amnezia
 RuntimeDirectoryMode=0750
+StateDirectory=panel-amnezia
+StateDirectoryMode=0700
 Group=panel
 
 NoNewPrivileges=true

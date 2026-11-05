@@ -67,6 +67,13 @@ func (in UserInput) normalize() (store.UserFields, error) {
 		ResetPeriod:  in.ResetPeriod,
 		AmneziaKey:   strings.Join(strings.Fields(in.AmneziaKey), ""),
 	}
+	// An AmneziaWG config made by the panel keeps its lines.
+	if conf := strings.TrimSpace(strings.ReplaceAll(in.AmneziaKey, "\r\n", "\n")); strings.HasPrefix(conf, "[Interface]") {
+		if len(conf) > 8000 || !strings.Contains(conf, "PrivateKey") || !strings.Contains(conf, "Endpoint") {
+			return f, validate.Fail("amneziaKey", "an AmneziaWG config needs PrivateKey and Endpoint")
+		}
+		f.AmneziaKey = conf + "\n"
+	}
 	for _, id := range in.SubHidden {
 		if id > 0 && !slices.Contains(f.SubHidden, id) {
 			f.SubHidden = append(f.SubHidden, id)
@@ -75,7 +82,7 @@ func (in UserInput) normalize() (store.UserFields, error) {
 	if len(f.SubHidden) > 500 {
 		return f, validate.Fail("subHidden", "too many inbounds")
 	}
-	if k := f.AmneziaKey; k != "" && (len(k) < 24 || len(k) > 32000 || !amneziaKeyRe.MatchString(k)) {
+	if k := f.AmneziaKey; k != "" && !strings.HasPrefix(k, "[Interface]") && (len(k) < 24 || len(k) > 32000 || !amneziaKeyRe.MatchString(k)) {
 		return f, validate.Fail("amneziaKey", "a key from the Amnezia app starts with vpn://")
 	}
 	if f.ResetPeriod == "" {

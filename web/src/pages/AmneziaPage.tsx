@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
-import { Boxes, Info, ScrollText, Shield } from 'lucide-react'
-import { api, type AmneziaContainer } from '@/lib/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Boxes, Download, Info, Pencil, Plus, ScrollText, Shield, Trash2 } from 'lucide-react'
+import { ApiError, api, type AmneziaClient, type AmneziaContainer } from '@/lib/api'
 import { formatBytes, formatDuration } from '@/lib/utils'
-import { Badge, Button, Card, Dialog, EmptyState, PageHeader } from '@/components/ui'
+import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select } from '@/components/ui'
+import { ShareRow } from '@/components/share'
 
 // Display names for the containers the Amnezia app creates.
 const kindNames: Record<string, string> = {
@@ -43,7 +44,7 @@ export function AmneziaPage() {
       <PageHeader title={t('amnezia.title')} subtitle={t('amnezia.subtitle')} />
       <div className="mb-4 flex items-start gap-3 rounded-2xl bg-accent px-4 py-3 text-sm text-accent-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{t('amnezia.readOnly')}</span>
+        <span>{t('amnezia.managedInfo')}</span>
       </div>
       {q.isPending ? (
         <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -74,6 +75,8 @@ export function AmneziaPage() {
 }
 
 function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void }) {
+  const [adding, setAdding] = useState(false)
+  const [action, setAction] = useState<{ client: AmneziaClient; mode: "rename" | "remove" } | null>(null)
   const { t, i18n } = useTranslation()
   const lng = i18n.language
   const running = c.state === 'running'
@@ -100,7 +103,15 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
         <Fact label={t('amnezia.memory')} value={running ? formatBytes(c.memBytes, lng) : '—'} />
       </div>
       <div className="mt-4">
-        <div className="text-sm font-medium">{t('amnezia.clients', { count: c.clients.length })}</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-medium">{t('amnezia.clients', { count: c.clients.length })}</div>
+          {c.managed && running && (
+            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              <Plus className="h-4 w-4" />
+              {t('amnezia.add')}
+            </Button>
+          )}
+        </div>
         {c.clients.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">{running ? t('amnezia.noClients') : t('amnezia.stopped')}</p>
         ) : (
@@ -111,6 +122,7 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
                   <th className="px-3 py-2 font-medium">{t('amnezia.clientName')}</th>
                   <th className="px-3 py-2 font-medium">{t('amnezia.lastSeen')}</th>
                   <th className="px-3 py-2 text-right font-medium">{t('amnezia.traffic')}</th>
+                  {c.managed && <th className="w-px px-1 py-2" />}
                 </tr>
               </thead>
               <tbody>
@@ -132,6 +144,18 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
                       <td className="px-3 py-2 text-right text-xs whitespace-nowrap tabular-nums">
                         ↓ {formatBytes(cl.txBytes, lng)} · ↑ {formatBytes(cl.rxBytes, lng)}
                       </td>
+                      {c.managed && (
+                        <td className="px-1 py-2">
+                          <div className="flex justify-end">
+                            <Button size="icon" variant="ghost" aria-label={t('amnezia.renameTitle')} onClick={() => setAction({ client: cl, mode: 'rename' })}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button size="icon" variant="ghost" aria-label={t('amnezia.remove')} onClick={() => setAction({ client: cl, mode: 'remove' })}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
@@ -143,6 +167,8 @@ function ContainerCard({ c, onLogs }: { c: AmneziaContainer; onLogs: () => void 
       <p className="mt-3 truncate text-[11px] text-muted-foreground" title={c.image}>
         {c.image}
       </p>
+      {adding && <AddClientDialog container={c.name} onClose={() => setAdding(false)} />}
+      {action && <ClientActionDialog container={c.name} client={action.client} mode={action.mode} onClose={() => setAction(null)} />}
     </Card>
   )
 }
@@ -175,6 +201,128 @@ function LogsDialog({ name, onClose }: { name: string; onClose: () => void }) {
           OK
         </Button>
       </div>
+    </Dialog>
+  )
+}
+
+function AddClientDialog({ container, onClose }: { container: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
+  const [name, setName] = useState('')
+  const [userId, setUserId] = useState(0)
+  const add = useMutation({
+    mutationFn: () => api.amnezia.addClient(container, name, userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['amnezia'] })
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+  const err = add.error instanceof ApiError ? add.error.message : add.error ? t('common.error') : ''
+  return (
+    <Dialog open onClose={onClose} title={t('amnezia.addTitle')}>
+      {add.data ? (
+        <div className="space-y-3">
+          <p className="text-sm">{t('amnezia.added', { ip: add.data.ip })}</p>
+          <ShareRow label={t('amnezia.configLabel')} hint={t('amnezia.configHint')} text={add.data.config} />
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const a = document.createElement('a')
+              a.href = URL.createObjectURL(new Blob([add.data.config], { type: 'text/plain' }))
+              a.download = (name.replace(/[^\p{L}\p{N}_-]+/gu, '_') || 'amnezia') + '.conf'
+              a.click()
+              URL.revokeObjectURL(a.href)
+            }}
+          >
+            <Download className="h-4 w-4" />
+            {t('amnezia.download')}
+          </Button>
+          <p className="rounded-xl bg-warning-soft px-3.5 py-2.5 text-xs text-warning">
+            {add.data.savedToUser ? t('amnezia.savedToUser') : t('amnezia.onlyOnce')}
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={onClose}>OK</Button>
+          </div>
+        </div>
+      ) : (
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            add.mutate()
+          }}
+        >
+          <Field label={t('amnezia.clientName')} hint={t('amnezia.nameHint')}>
+            {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={64} autoFocus required />}
+          </Field>
+          <Field label={t('amnezia.linkUser')} hint={t('amnezia.linkUserHint')}>
+            {(id) => (
+              <Select id={id} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
+                <option value={0}>{t('amnezia.noUser')}</option>
+                {users.data?.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <p className="text-xs text-muted-foreground">{t('amnezia.safety')}</p>
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" disabled={add.isPending}>
+              {add.isPending ? t('amnezia.working') : t('amnezia.add')}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
+  )
+}
+
+function ClientActionDialog({ container, client, mode, onClose }: { container: string; client: AmneziaClient; mode: 'rename' | 'remove'; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [name, setName] = useState(client.name)
+  const m = useMutation({
+    mutationFn: () => (mode === 'remove' ? api.amnezia.removeClient(container, client.key) : api.amnezia.renameClient(container, client.key, name)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['amnezia'] })
+      onClose()
+    },
+  })
+  const err = m.error instanceof ApiError ? m.error.message : m.error ? t('common.error') : ''
+  const label = client.name || client.id
+  return (
+    <Dialog open onClose={onClose} title={mode === 'remove' ? t('amnezia.removeTitle', { name: label }) : t('amnezia.renameTitle')}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          m.mutate()
+        }}
+      >
+        {mode === 'remove' ? (
+          <p className="text-sm">{t('amnezia.removeText')}</p>
+        ) : (
+          <Field label={t('amnezia.clientName')}>
+            {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={64} autoFocus required />}
+          </Field>
+        )}
+        {err && <p className="text-sm text-destructive">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" variant={mode === 'remove' ? 'danger' : 'primary'} disabled={m.isPending}>
+            {m.isPending ? t('amnezia.working') : mode === 'remove' ? t('amnezia.remove') : t('common.save')}
+          </Button>
+        </div>
+      </form>
     </Dialog>
   )
 }

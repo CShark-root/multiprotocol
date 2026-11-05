@@ -1,8 +1,10 @@
 // Package amnezia reads the Amnezia containers that the official Amnezia
-// app installed on the server. It never changes them: the helper (run as
-// root by its own systemd unit, since Docker's socket is root-equivalent)
-// answers a fixed set of read-only questions, and the panel, which stays
-// unprivileged, asks it over a unix socket.
+// app installed on the server, and manages AmneziaWG clients the same way
+// the app does (manage.go). Containers themselves are never started,
+// stopped, rebuilt or removed. The helper (run as root by its own systemd
+// unit, since Docker's socket is root-equivalent) answers a fixed set of
+// requests, and the panel, which stays unprivileged, asks it over a unix
+// socket.
 package amnezia
 
 import (
@@ -44,13 +46,15 @@ type Container struct {
 	MemBytes  uint64    `json:"memBytes"`
 	Clients   []Client  `json:"clients"`
 	Note      string    `json:"note,omitempty"` // why clients are missing
+	Managed   bool      `json:"managed"`        // the panel can add and remove its clients
 }
 
 // Client is one access shared from the Amnezia app. Keys stay out: only
 // a short fingerprint of the public key is shown.
 type Client struct {
 	Name          string     `json:"name"`
-	ID            string     `json:"id"` // shortened public key / client id
+	ID            string     `json:"id"`  // shortened public key / client id
+	Key           string     `json:"key"` // full public key (not secret): names the client in changes
 	Created       string     `json:"created,omitempty"`
 	LastHandshake *time.Time `json:"lastHandshake,omitempty"` // nil: the protocol does not report it
 	Endpoint      string     `json:"endpoint,omitempty"`
@@ -165,7 +169,7 @@ func Collect(ctx context.Context, socket string) Status {
 	st.Docker = true
 	for _, dc := range list {
 		name := strings.TrimPrefix(dc.Names[0], "/")
-		c := Container{Name: name, Kind: strings.TrimPrefix(name, "amnezia-"), Image: dc.Image, State: dc.State, Status: dc.Status, Ports: []string{}, Clients: []Client{}}
+		c := Container{Name: name, Kind: strings.TrimPrefix(name, "amnezia-"), Image: dc.Image, State: dc.State, Status: dc.Status, Ports: []string{}, Clients: []Client{}, Managed: Manageable(name)}
 		for _, p := range dc.Ports {
 			// Docker lists a port once per address family.
 			if port := strconv.Itoa(p.PublicPort) + "/" + p.Type; p.PublicPort != 0 && !slices.Contains(c.Ports, port) {
@@ -255,7 +259,7 @@ func clients(ctx context.Context, d *docker, id, kind string) ([]Client, string)
 		if !named {
 			c.Name = ""
 		}
-		c.ID = short(cid)
+		c.ID, c.Key = short(cid), cid
 		list = append(list, c)
 	}
 	note := ""

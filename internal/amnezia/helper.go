@@ -1,6 +1,7 @@
 package amnezia
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,6 +69,38 @@ func Serve(ctx context.Context, socket, dockerSocket string, gid int, log *slog.
 			return
 		}
 		writeJSON(w, lines)
+	})
+	// Client changes. Each one invalidates the cached status.
+	change := func(w http.ResponseWriter, r *http.Request, in any, do func(context.Context) (any, error)) {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(in); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		c, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		out, err := do(c)
+		mu.Lock()
+		cached = Status{}
+		mu.Unlock()
+		if err != nil {
+			log.Warn("amnezia client change", "path", r.URL.Path, "err", err)
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		log.Info("amnezia client change", "path", r.URL.Path)
+		writeJSON(w, out)
+	}
+	mux.HandleFunc("POST /clients/add", func(w http.ResponseWriter, r *http.Request) {
+		var p AddParams
+		change(w, r, &p, func(c context.Context) (any, error) { return AddClient(c, dockerSocket, p) })
+	})
+	mux.HandleFunc("POST /clients/remove", func(w http.ResponseWriter, r *http.Request) {
+		var p KeyParams
+		change(w, r, &p, func(c context.Context) (any, error) { return struct{}{}, RemoveClient(c, dockerSocket, p) })
+	})
+	mux.HandleFunc("POST /clients/rename", func(w http.ResponseWriter, r *http.Request) {
+		var p KeyParams
+		change(w, r, &p, func(c context.Context) (any, error) { return struct{}{}, RenameClient(c, dockerSocket, p) })
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -137,4 +171,52 @@ func (c *HelperClient) Logs(ctx context.Context, name string, tail int) ([]strin
 	var lines []string
 	err := c.get(ctx, "/logs?"+url.Values{"name": {name}, "tail": {strconv.Itoa(tail)}}.Encode(), &lines)
 	return lines, err
+}
+
+func (c *HelperClient) post(ctx context.Context, path string, in, out any) error {
+	body, _ := json.Marshal(in)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://helper"+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		var ne *net.OpError
+		if errors.As(err, &ne) {
+			return ErrNoHelper
+		}
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return errors.New("помощник Amnezia старой версии — обновите панель")
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &ChangeError{Msg: strings.TrimSpace(string(b))}
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
+}
+
+// ChangeError is a refused or failed client change, worded for the admin.
+type ChangeError struct{ Msg string }
+
+func (e *ChangeError) Error() string { return e.Msg }
+
+func (c *HelperClient) AddClient(ctx context.Context, p AddParams) (AddedClient, error) {
+	var nc AddedClient
+	err := c.post(ctx, "/clients/add", p, &nc)
+	return nc, err
+}
+
+func (c *HelperClient) RemoveClient(ctx context.Context, p KeyParams) error {
+	return c.post(ctx, "/clients/remove", p, nil)
+}
+
+func (c *HelperClient) RenameClient(ctx context.Context, p KeyParams) error {
+	return c.post(ctx, "/clients/rename", p, nil)
 }
