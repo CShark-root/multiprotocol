@@ -9,7 +9,9 @@ import { Badge, Button, Card, Dialog, EmptyState, PageHeader } from '@/component
 // Display names for the containers the Amnezia app creates.
 const kindNames: Record<string, string> = {
   awg: 'AmneziaWG',
-  awg2: 'AmneziaWG 2',
+  // The container is named awg2 by the app whatever AmneziaWG version runs
+  // inside, so no number is shown.
+  awg2: 'AmneziaWG',
   wireguard: 'WireGuard',
   xray: 'XRay',
   ssxray: 'Shadowsocks (XRay)',
