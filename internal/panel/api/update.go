@@ -124,3 +124,38 @@ func (s *server) startUpdate(w http.ResponseWriter, r *http.Request) {
 		Diff: map[string]any{"from": version.Version, "cores": in.Cores}}, time.Now())
 	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
 }
+
+// coresAuto — настройки автообновления ядер.
+func (s *server) coresAuto(w http.ResponseWriter, r *http.Request) {
+	if s.Cores == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"supported": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": s.Cores.Get(r.Context())})
+}
+
+func (s *server) saveCoresAuto(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Enabled bool `json:"enabled"`
+		Hour    int  `json:"hour"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if s.Cores == nil {
+		writeError(w, http.StatusNotImplemented, "unsupported", "no local cores")
+		return
+	}
+	if in.Hour < 0 || in.Hour > 23 {
+		writeError(w, http.StatusBadRequest, "hour", "0-23")
+		return
+	}
+	out, err := s.Cores.Save(r.Context(), in.Enabled, in.Hour)
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	s.Store.AddAudit(r.Context(), store.AuditEntry{AdminID: adminFrom(r.Context()).ID, Action: "cores.auto", TargetType: "system",
+		Diff: map[string]any{"enabled": in.Enabled, "hour": in.Hour}}, time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": out})
+}

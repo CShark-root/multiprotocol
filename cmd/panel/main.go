@@ -146,6 +146,7 @@ func serve(args []string) int {
 		log.Warn("no geo databases yet; they will be downloaded", "err", err)
 	}
 	var routingSvc *service.Routing
+	var coreUpdater *service.CoreUpdater
 	if *xrayAPI == "auto" {
 		// A fixed port would clash with other Xray installs on the same
 		// machine (3x-ui uses 62789); the API is only ever reached locally.
@@ -172,6 +173,8 @@ func serve(args []string) int {
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)
 		go routingSvc.RunWarpWatch(ctx, func() error { return localAgent.RestartCore("xray") })
+		coreUpdater = service.NewCoreUpdater(st, events, localAgent.Health, *dataDir, log)
+		go coreUpdater.Run(ctx)
 	} else {
 		routingSvc = service.NewRouting(st, events, geoDir, nil, nil, log)
 	}
@@ -227,6 +230,7 @@ func serve(args []string) int {
 		Store:      st,
 		Scanner:    service.NewScanner(),
 		Routing:    routingSvc,
+		Cores:      coreUpdater,
 		Reboot:     rebootFunc(*dev),
 		Panel:      api.PanelConfig{DataDir: *dataDir, Current: stored, Restart: restart},
 		Agent:      localAgent,

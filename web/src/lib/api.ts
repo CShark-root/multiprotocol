@@ -422,6 +422,8 @@ export const api = {
         'system/update' + (check ? '?check=1' : ''),
       ),
     start: (cores: boolean) => request<{ started: boolean }>('POST', 'system/update', { cores }),
+    coresAuto: () => request<CoresAuto>('GET', 'system/cores-auto'),
+    saveCoresAuto: (enabled: boolean, hour: number) => request<CoresAuto>('PUT', 'system/cores-auto', { enabled, hour }),
   },
   telegram: {
     get: () => request<TelegramInfo>('GET', 'telegram'),
@@ -478,3 +480,6 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `inbounds/${id}`),
   },
 }
+
+// Автообновление ядер: настройки и итог последней ночной проверки.
+export type CoresAuto = { supported: boolean; settings?: { enabled: boolean; hour: number; lastCheck: string; lastError?: string } }

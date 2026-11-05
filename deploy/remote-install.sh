@@ -38,6 +38,11 @@ install -m 0755 "$SRC/panel-update.sh" /usr/local/lib/panel/panel-update.sh
 install -m 0644 "$SRC/panel-update.service" /etc/systemd/system/panel-update.service
 install -m 0644 "$SRC/panel-update.path" /etc/systemd/system/panel-update.path
 [[ -f $SRC/install.sh ]] && install -m 0755 "$SRC/install.sh" /usr/local/lib/panel/install.sh
+# Автообновление ядер: скрипт и установщики ядер лежат рядом.
+[[ -f $SRC/update-cores.sh ]] && install -m 0755 "$SRC/update-cores.sh" /usr/local/lib/panel/update-cores.sh
+for s in install-xray.sh install-hysteria.sh install-singbox.sh; do
+  install -m 0644 "$SRC/$s" /usr/local/lib/panel/$s
+done
 echo "==> cores"
 for core in xray hysteria sing-box; do
   bin=/usr/local/lib/panel/$core/$core

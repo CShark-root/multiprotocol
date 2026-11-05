@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Tabs, useSavedTab } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
 
 const tabs = ['access', 'security', 'maintenance'] as const
@@ -34,6 +34,7 @@ export function SettingsPage() {
           {tab === 'maintenance' && (
             <>
               <UpdateCard />
+              <CoresAutoCard />
               <BackupCard />
               <TelegramCard />
             </>
@@ -1017,6 +1018,52 @@ function TelegramCard() {
           </Button>
         </div>
       </div>
+    </Section>
+  )
+}
+
+// CoresAutoCard — ночная проверка и установка новых версий ядер.
+function CoresAutoCard() {
+  const { t, i18n } = useTranslation()
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['cores-auto'], queryFn: api.update.coresAuto })
+  const save = useMutation({
+    mutationFn: (v: { enabled: boolean; hour: number }) => api.update.saveCoresAuto(v.enabled, v.hour),
+    onSuccess: (d) => qc.setQueryData(['cores-auto'], d),
+  })
+  const s = q.data?.settings
+  const last = s?.lastCheck && !s.lastCheck.startsWith('0001') ? new Date(s.lastCheck).toLocaleString(i18n.language) : ''
+  return (
+    <Section icon={<RefreshCw className="h-4 w-4" />} title={t('update.autoTitle')} hint={t('update.autoHint')}>
+      {!q.data ? (
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+      ) : !q.data.supported || !s ? (
+        <p className="text-sm text-muted-foreground">{t('update.autoUnsupported')}</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm">{t('update.autoOn')}</span>
+            <Switch label={t('update.autoOn')} checked={s.enabled} disabled={save.isPending} onChange={(v) => save.mutate({ enabled: v, hour: s.hour })} />
+          </div>
+          {s.enabled && (
+            <Field label={t('update.autoHour')}>
+              {(id) => (
+                <Select id={id} value={s.hour} disabled={save.isPending} onChange={(e) => save.mutate({ enabled: true, hour: Number(e.target.value) })}>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {String(h).padStart(2, '0')}:00
+                  </option>
+                ))}
+                </Select>
+              )}
+            </Field>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {last ? t('update.autoLast', { time: last }) : t('update.autoNever')}
+            {s.lastError ? ` — ${s.lastError}` : ''}
+          </p>
+        </div>
+      )}
     </Section>
   )
 }

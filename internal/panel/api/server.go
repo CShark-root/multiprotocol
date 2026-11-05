@@ -35,6 +35,7 @@ type Deps struct {
 	Store      *store.Store // read-only views: logs, events, audit
 	Scanner    *service.Scanner
 	Routing    *service.Routing
+	Cores      *service.CoreUpdater // nil без локального агента
 	Domains    *service.Domains
 	Telegram   *service.Notifier
 	Amnezia    *amnezia.HelperClient // nil: no Amnezia tab data
@@ -89,6 +90,8 @@ func New(d Deps) http.Handler {
 				r.Post("/system/backup", s.downloadBackup)
 				r.Get("/system/update", s.updateStatus)
 				r.Post("/system/update", s.startUpdate)
+				r.Get("/system/cores-auto", s.coresAuto)
+				r.Put("/system/cores-auto", s.saveCoresAuto)
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/", s.listUsers)
 					r.Post("/", s.createUser)

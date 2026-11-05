@@ -32,6 +32,13 @@ type TelegramSettings struct {
 	LastError      string    `json:"lastError"`
 }
 
+// notifyAlias: событие → переключатель, которым оно включается.
+var notifyAlias = map[string]string{
+	EventWarpRecovered: EventWarpRestarted,
+	EventCoresUpdated:  EventCoreUp,
+	EventCoresRollback: EventCoreDown,
+}
+
 // NotifyEvents are the event types a bot can report, in display order.
 var NotifyEvents = []string{
 	EventCoreDown, EventCoreUp, EventUserLimited, EventUserExpired, EventUserRestored,
@@ -129,10 +136,10 @@ func (n *Notifier) onEvent(e store.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s := n.Get(ctx)
-	// «WARP снова работает» включается тем же переключателем, что и «WARP не отвечал».
+	// Парные события включаются тем же переключателем, что и основное.
 	typ := e.Type
-	if typ == EventWarpRecovered {
-		typ = EventWarpRestarted
+	if v, ok := notifyAlias[typ]; ok {
+		typ = v
 	}
 	if !n.ready(s) || !slices.Contains(s.Events, typ) {
 		return
@@ -192,6 +199,10 @@ func eventText(e store.Event, name string) string {
 			return "🔄 WARP не отвечал — переключаю на " + ep + ": " + e.Message
 		}
 		return "🔄 WARP не отвечал — Xray перезапущен: " + e.Message
+	case EventCoresUpdated:
+		return "⬆️ " + str(d, "core") + " обновлён: " + str(d, "from") + " → " + str(d, "to")
+	case EventCoresRollback:
+		return "↩️ " + str(d, "core") + " " + str(d, "to") + " не запустился — возвращена " + str(d, "from")
 	case EventWarpRecovered:
 		return "✅ WARP снова работает (" + str(d, "endpoint") + ", перерыв " + str(d, "minutes") + " мин)"
 	case EventAmneziaUp:

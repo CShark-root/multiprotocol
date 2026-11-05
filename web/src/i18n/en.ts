@@ -714,6 +714,13 @@ export const en: Messages = {
     failed: 'failed',
     inProgress: 'running',
     reinstall: 'Reinstall this version',
+    autoTitle: 'Automatic core updates',
+    autoHint: 'Once a day the panel compares Xray, Hysteria2 and sing-box with their latest stable releases. A new core is installed only if it accepts the current settings; if it does not start, the old one comes back. Clients reconnect within seconds.',
+    autoOn: 'Update cores automatically',
+    autoHour: 'Check time (server clock)',
+    autoLast: 'Last check: {{time}}',
+    autoNever: 'No checks yet',
+    autoUnsupported: 'Available after installing with install.sh.',
   },
   telegram: {
     title: 'Telegram',
