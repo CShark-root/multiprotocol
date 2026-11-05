@@ -24,6 +24,12 @@ curl -fsSL https://raw.githubusercontent.com/CShark-root/multiprotocol/main/inst
 curl -fsSL https://raw.githubusercontent.com/CShark-root/multiprotocol/main/scripts/vps-check.sh | sudo bash
 ```
 
+Что сервер показывает наружу: открытые порты, ответы панели и Reality незнакомцу, служебные каналы только на 127.0.0.1, права на файлы. Скрипт ничего не меняет, запускать можно в любой момент:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CShark-root/multiprotocol/main/scripts/exposure-check.sh | sudo bash
+```
+
 Переезд с 3x-ui и других панелей: [docs/migration.md](docs/migration.md).
 
 ## Возможности

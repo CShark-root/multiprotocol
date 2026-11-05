@@ -11,6 +11,8 @@ Restart=on-failure
 RestartSec=3
 StateDirectory=panel
 StateDirectoryMode=0700
+# Files the panel creates (database, keys, configs) are for its user only.
+UMask=0077
 
 # Not root: the only privilege is binding ports below 1024, inherited by the
 # Xray child process so it can listen on 443.

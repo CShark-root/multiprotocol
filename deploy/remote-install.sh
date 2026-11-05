@@ -84,6 +84,9 @@ polkit.addRule(function (action, subject) {
 RULES
 fi
 
+# Earlier versions created the database world-readable (the directory is
+# 0700, so it was never reachable, but keep it tight anyway).
+chmod -f 600 /var/lib/panel/panel.db /var/lib/panel/panel.db-wal /var/lib/panel/panel.db-shm 2>/dev/null || true
 echo "==> restart"
 systemctl daemon-reload
 systemctl enable panel panel-amnezia panel-net panel-update.path >/dev/null 2>&1
