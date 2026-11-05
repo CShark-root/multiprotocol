@@ -53,6 +53,7 @@ type UserInput struct {
 	ResetPeriod  string
 	ExpireAt     *time.Time
 	AmneziaKey   string // vpn://... from the Amnezia app, or empty
+	SubHidden    []int64
 }
 
 var amneziaKeyRe = regexp.MustCompile(`^vpn://[A-Za-z0-9_=+/-]+$`)
@@ -65,6 +66,14 @@ func (in UserInput) normalize() (store.UserFields, error) {
 		TrafficLimit: in.TrafficLimit,
 		ResetPeriod:  in.ResetPeriod,
 		AmneziaKey:   strings.Join(strings.Fields(in.AmneziaKey), ""),
+	}
+	for _, id := range in.SubHidden {
+		if id > 0 && !slices.Contains(f.SubHidden, id) {
+			f.SubHidden = append(f.SubHidden, id)
+		}
+	}
+	if len(f.SubHidden) > 500 {
+		return f, validate.Fail("subHidden", "too many inbounds")
 	}
 	if k := f.AmneziaKey; k != "" && (len(k) < 24 || len(k) > 32000 || !amneziaKeyRe.MatchString(k)) {
 		return f, validate.Fail("amneziaKey", "a key from the Amnezia app starts with vpn://")

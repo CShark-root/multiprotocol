@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -19,6 +21,7 @@ type User struct {
 	UUID         string // VLESS credential
 	LastResetAt  time.Time
 	AmneziaKey   string
+	SubHidden    []int64 // inbounds left out of the subscription
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -32,10 +35,26 @@ type UserFields struct {
 	ResetPeriod  string
 	ExpireAt     *time.Time
 	AmneziaKey   string // vpn://... shared from the Amnezia app; shown only
+	SubHidden    []int64
 }
 
 const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, reset_period,
-	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key`
+	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key, sub_hidden`
+
+// idList stores a list of ids as JSON ("" when empty).
+func idList(ids []int64) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(ids)
+	return string(b)
+}
+
+// InSubscription reports whether an inbound belongs in the user's
+// subscription. Direct links work for every inbound regardless.
+func (u User) InSubscription(inboundID int64) bool {
+	return !slices.Contains(u.SubHidden, inboundID)
+}
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY id`)
@@ -157,10 +176,10 @@ func (s *Store) PruneTrafficDaily(ctx context.Context, before string) error {
 
 func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid string, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users
-		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key, sub_hidden)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, uuid,
-		now.Unix(), now.Unix(), now.Unix(), f.AmneziaKey)
+		now.Unix(), now.Unix(), now.Unix(), f.AmneziaKey, idList(f.SubHidden))
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -176,9 +195,9 @@ func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid str
 
 func (s *Store) UpdateUser(ctx context.Context, id int64, f UserFields, now time.Time) (User, error) {
 	res, err := s.db.ExecContext(ctx, `UPDATE users SET
-		name = ?, note = ?, enabled = ?, traffic_limit = ?, reset_period = ?, expire_at = ?, amnezia_key = ?, updated_at = ?
+		name = ?, note = ?, enabled = ?, traffic_limit = ?, reset_period = ?, expire_at = ?, amnezia_key = ?, sub_hidden = ?, updated_at = ?
 		WHERE id = ?`,
-		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), f.AmneziaKey, now.Unix(), id)
+		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), f.AmneziaKey, idList(f.SubHidden), now.Unix(), id)
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -227,12 +246,16 @@ func scanUser(row scanner) (User, error) {
 	var u User
 	var enabled, lastReset, created, updated int64
 	var expire sql.NullInt64
+	var hidden string
 	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.ResetPeriod,
-		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated, &u.AmneziaKey)
+		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated, &u.AmneziaKey, &hidden)
 	if err != nil {
 		return User{}, err
 	}
 	u.Enabled = enabled != 0
+	if hidden != "" {
+		json.Unmarshal([]byte(hidden), &u.SubHidden)
+	}
 	if expire.Valid {
 		t := fromUnix(expire.Int64)
 		u.ExpireAt = &t

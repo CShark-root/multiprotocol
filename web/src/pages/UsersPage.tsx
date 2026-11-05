@@ -19,7 +19,7 @@ const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'>
 const resetPeriods: ResetPeriod[] = ['none', 'day', 'week', 'month']
 
 function toInput(u: User): UserInput {
-  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, resetPeriod: u.resetPeriod, expireAt: u.expireAt, amneziaKey: u.amneziaKey }
+  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, resetPeriod: u.resetPeriod, expireAt: u.expireAt, amneziaKey: u.amneziaKey, subHidden: u.subHidden }
 }
 
 export function UsersPage() {
@@ -200,7 +200,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
             // Which methods each subscription carries, named the way the admin named them.
             const names = (family: 'xray' | 'singbox') =>
               links.data.links
-                .filter((l) => l.apps.includes(family) && (family === 'singbox' || l.url))
+                .filter((l) => l.inSub && l.apps.includes(family) && (family === 'singbox' || l.url))
                 .map((l) => l.remark)
                 .join(', ') || '—'
             return (
@@ -213,9 +213,9 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
               </div>
             )
           })()}
-          <div>
-            <div className="text-sm font-medium">{t('connect.links')}</div>
-            <p className="mb-2 text-xs text-muted-foreground">{t('connect.linksHint')}</p>
+          <details className="border-t pt-3">
+            <summary className="cursor-pointer text-sm font-medium">{t('connect.links')}</summary>
+            <p className="mb-2 mt-1 text-xs text-muted-foreground">{t('connect.linksHint')}</p>
             {links.data.links.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t('connect.noLinks')}</p>
             ) : (
@@ -226,7 +226,9 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                   const kind = kindLabel(l.protocol, l.transport)
                   const named = l.remark.toLowerCase().includes(t(`inbounds.protocols.${l.protocol}.title`).split(' ')[0].toLowerCase())
                   const label = named ? l.remark : `${l.remark} · ${kind}`
-                  const works = t('connect.worksIn', { apps: l.apps.map((a) => t(`inbounds.apps.${a}`)).join('; ') })
+                  const works =
+                    t('connect.worksIn', { apps: l.apps.map((a) => t(`inbounds.apps.${a}`)).join('; ') }) +
+                    (l.inSub ? '' : ` · ${t('connect.notInSub')}`)
                   return l.url ? (
                     <ShareRow key={l.inboundId} label={label} hint={works} text={l.url} />
                   ) : (
@@ -238,7 +240,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                 })}
               </div>
             )}
-          </div>
+          </details>
           {user.amneziaKey && (
             <div>
               <div className="text-sm font-medium">Amnezia</div>
@@ -266,6 +268,9 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
   const [expire, setExpire] = useState(toDateInput(user?.expireAt ?? null))
   const [enabled, setEnabled] = useState(user?.enabled ?? true)
   const [amneziaKey, setAmneziaKey] = useState(user?.amneziaKey ?? '')
+  const [subHidden, setSubHidden] = useState<number[]>(user?.subHidden ?? [])
+  const inbounds = useQuery({ queryKey: ['inbounds'], queryFn: api.inbounds.list })
+  const kindLabel = useKindLabel()
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const save = useMutation({
@@ -285,7 +290,7 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
     e.preventDefault()
     setErrors({})
     const gb = Math.max(0, Number(limitGb.replace(',', '.')) || 0)
-    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), expireAt: fromDateInput(expire), amneziaKey })
+    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), expireAt: fromDateInput(expire), amneziaKey, subHidden })
   }
 
   return (
@@ -316,6 +321,30 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
         <Field label={t('users.expireAt')} hint={t('users.expireAtHint')} error={errors.expireAt}>
           {(id) => <Input id={id} type="date" value={expire} onChange={(e) => setExpire(e.target.value)} />}
         </Field>
+        {inbounds.data && inbounds.data.length > 0 && (
+          <div>
+            <div className="text-sm font-medium">{t('users.inSub')}</div>
+            <p className="mb-2 text-xs text-muted-foreground">{t('users.inSubHint')}</p>
+            <div className="divide-y rounded-xl border">
+              {inbounds.data.map((ib) => (
+                <div key={ib.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm">{ib.remark}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {kindLabel(ib.protocol, ib.transport)}
+                      {!ib.enabled && ` · ${t('users.inboundOff')}`}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={!subHidden.includes(ib.id)}
+                    onChange={(on) => setSubHidden((h) => (on ? h.filter((x) => x !== ib.id) : [...h, ib.id]))}
+                    label={ib.remark}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Field label={t('users.amneziaKey')} hint={t('users.amneziaKeyHint')} error={errors.amneziaKey}>
           {(id) => (
             <textarea

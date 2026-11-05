@@ -19,8 +19,9 @@ type linkDTO struct {
 	Remark    string   `json:"remark"`
 	Protocol  string   `json:"protocol"`
 	Transport string   `json:"transport"`
-	Apps      []string `json:"apps"` // client app families that can use it
-	URL       string   `json:"url"`  // "" when the protocol has no share-link format
+	Apps      []string `json:"apps"`  // client app families that can use it
+	URL       string   `json:"url"`   // "" when the protocol has no share-link format
+	InSub     bool     `json:"inSub"` // part of the user's subscription
 }
 
 func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +44,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 		if ib.Enabled {
 			links = append(links, linkDTO{
 				InboundID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport,
-				Apps: service.ClientApps(ib.Protocol), URL: subscription.Link(ib, u, s.PublicHost),
+				Apps: service.ClientApps(ib.Protocol), URL: subscription.Link(ib, u, s.PublicHost), InSub: u.InSubscription(ib.ID),
 			})
 		}
 	}
@@ -98,10 +99,16 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 			stealth.Decoy(w, d.Decoy)
 			return
 		}
-		inbounds, err := d.Store.ListInbounds(r.Context())
+		all, err := d.Store.ListInbounds(r.Context())
 		if err != nil {
 			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 			return
+		}
+		inbounds := all[:0]
+		for _, ib := range all {
+			if u.InSubscription(ib.ID) {
+				inbounds = append(inbounds, ib)
+			}
 		}
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")

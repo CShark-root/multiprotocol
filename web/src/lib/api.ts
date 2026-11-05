@@ -60,6 +60,7 @@ export type User = {
   expireAt: string | null
   subToken: string
   amneziaKey: string
+  subHidden: number[]
   createdAt: string
   updatedAt: string
 }
@@ -72,6 +73,7 @@ export type UserInput = {
   resetPeriod: ResetPeriod
   expireAt: string | null
   amneziaKey: string
+  subHidden: number[]
 }
 
 export type OnlineEntry = { userId: number; ips: string[]; connections: number }
@@ -295,7 +297,7 @@ export type UserLinks = {
   subscriptionUrl: string
   singboxUrl: string
   overLan: boolean
-  links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; apps: AppFamily[]; url: string }[]
+  links: { inboundId: number; remark: string; protocol: Protocol; transport: Transport; apps: AppFamily[]; url: string; inSub: boolean }[]
 }
 
 export type SystemInfo = {
