@@ -20,6 +20,7 @@ type BotDeps struct {
 	Notifier *Notifier
 	Users    *Users
 	Agent    *agent.Agent
+	Nodes    *Nodes // nil: только этот сервер
 	Reboot   func() error
 	SubBase  string // subscription URL prefix, the token is appended
 	Log      *slog.Logger
@@ -362,6 +363,7 @@ func (b *Bot) onlineNames(ctx context.Context, list []store.User) string {
 		return "—"
 	}
 	m, _ := b.d.Agent.Online(ctx)
+	m = MergeOnline(m, b.d.Nodes)
 	names := map[int64]string{}
 	for _, u := range list {
 		names[u.ID] = u.Name

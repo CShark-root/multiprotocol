@@ -39,6 +39,7 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, err)
 		return
 	}
+	inbounds = s.Store.WithNodeHosts(r.Context(), inbounds)
 	links := []linkDTO{}
 	for _, ib := range inbounds {
 		if ib.Enabled {
@@ -104,6 +105,7 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		all = d.Store.WithNodeHosts(r.Context(), all)
 		inbounds := all[:0]
 		for _, ib := range all {
 			if u.InSubscription(ib.ID) {

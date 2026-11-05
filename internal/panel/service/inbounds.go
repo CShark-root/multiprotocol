@@ -102,6 +102,7 @@ type InboundInput struct {
 	Port      int
 	Address   string
 	Enabled   bool
+	NodeID    int64 // сервер: 0 — этот
 
 	// Reality (VLESS, Trojan) and ShadowTLS: the real site to imitate.
 	Target          string // "www.microsoft.com" or "host:port"
@@ -229,6 +230,7 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 		Port:      in.Port,
 		Address:   strings.TrimSpace(in.Address),
 		Enabled:   in.Enabled,
+		NodeID:    in.NodeID,
 	}
 	if n := utf8.RuneCountInString(f.Remark); n < 1 || n > 64 {
 		return f, validate.Fail("remark", "1-64 characters")
@@ -246,9 +248,20 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 	if cur != nil && (cur.Protocol != f.Protocol || cur.Transport != f.Transport) {
 		return f, validate.Fail("protocol", "protocol and transport cannot be changed; create a new inbound instead")
 	}
+	if f.NodeID < 0 {
+		return f, validate.Fail("nodeId", "unknown server")
+	}
+	if f.NodeID > 0 {
+		if _, err := s.store.GetNode(ctx, f.NodeID); err != nil {
+			return f, validate.Fail("nodeId", "unknown server")
+		}
+		if in.HopPorts != "" {
+			return f, validate.Fail("hopPorts", "port hopping works only on this server for now")
+		}
+	}
 	f.Security = spec.Security
 	for _, network := range spec.Networks {
-		if err := s.checkPort(ctx, f.Port, network, cur); err != nil {
+		if err := s.checkPort(ctx, f.Port, network, f.NodeID, cur); err != nil {
 			return f, err
 		}
 	}
@@ -477,11 +490,11 @@ func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound, ce
 	return nil
 }
 
-func (s *Inbounds) checkPort(ctx context.Context, port int, network string, cur *store.Inbound) error {
+func (s *Inbounds) checkPort(ctx context.Context, port int, network string, node int64, cur *store.Inbound) error {
 	if port < 1 || port > 65535 {
 		return validate.Fail("port", "1-65535")
 	}
-	if network == "tcp" && port == s.panelPort {
+	if node == 0 && network == "tcp" && port == s.panelPort {
 		return validate.Fail("port", "this port is used by the panel itself")
 	}
 	all, err := s.store.ListInbounds(ctx)
@@ -489,12 +502,13 @@ func (s *Inbounds) checkPort(ctx context.Context, port int, network string, cur 
 		return err
 	}
 	for _, other := range all {
-		if other.Port == port && slices.Contains(Networks(other.Protocol), network) && (cur == nil || other.ID != cur.ID) {
+		if other.NodeID == node && other.Port == port && slices.Contains(Networks(other.Protocol), network) && (cur == nil || other.ID != cur.ID) {
 			return validate.Fail("port", fmt.Sprintf("already used by inbound %q", other.Remark))
 		}
 	}
 	// A port this inbound already holds is busy because its core listens on it.
-	if cur == nil || cur.Port != port {
+	// Порты другого сервера отсюда не проверить — их проверит его ядро.
+	if node == 0 && (cur == nil || cur.Port != port || cur.NodeID != 0) {
 		if err := s.portFree(network, port); err != nil {
 			return validate.Fail("port", "the port is busy or unavailable on this server")
 		}
@@ -513,7 +527,7 @@ func (s *Inbounds) SuggestPort(ctx context.Context, networks ...string) int {
 next:
 	for _, p := range candidates {
 		for _, n := range networks {
-			if s.checkPort(ctx, p, n, nil) != nil {
+			if s.checkPort(ctx, p, n, 0, nil) != nil {
 				continue next
 			}
 		}
@@ -748,7 +762,7 @@ func (s *Inbounds) RefreshDomainCerts(ctx context.Context) error {
 			continue
 		}
 		f := store.InboundFields{Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
-			Port: ib.Port, Address: ib.Address, Settings: ib.Settings, Enabled: ib.Enabled, TestKit: ib.TestKit}
+			Port: ib.Port, Address: ib.Address, Settings: ib.Settings, Enabled: ib.Enabled, TestKit: ib.TestKit, NodeID: ib.NodeID}
 		set := func(certPEM, keyPEM, pin *string, flag *bool) error {
 			if c != nil {
 				*certPEM, *keyPEM, *pin, *flag = string(c.CertPEM), string(c.KeyPEM), "", true

@@ -305,12 +305,15 @@ function TargetField(props: {
 
 function InboundFacts({ ib }: { ib: Inbound }) {
   const { t } = useTranslation()
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.nodes.list, staleTime: 30_000 })
+  const nodeName = (id: number) => nodes.data?.find((n) => n.id === id)?.name ?? '#' + id
   const facts: [string, string][] = []
   if (realityProtocols.includes(ib.protocol)) facts.push([t('inbounds.target'), ib.serverName])
   if (ib.protocol === 'hysteria2') facts.push([t('inbounds.masquerade'), ib.masquerade?.replace(/^https:\/\/|\/$/g, '') ?? ''])
   if (certProtocols.includes(ib.protocol)) facts.push([t('inbounds.hySni'), ib.serverName])
   if (ib.protocol === 'shadowtls') facts.push([t('inbounds.handshake'), ib.target?.replace(/:443$/, '') ?? ''])
   if (ib.address) facts.push([t('inbounds.address'), ib.address])
+  if (ib.nodeId) facts.push([t('inbounds.server'), nodeName(ib.nodeId)])
   facts.push([t('inbounds.appsLabel'), ib.apps.map((a) => t(`inbounds.apps.${a}Short`)).join(', ')])
   const selfSigned = (ib.protocol === 'hysteria2' || certProtocols.includes(ib.protocol)) && !ib.domainCert
   return (
@@ -337,6 +340,7 @@ function toInput(ib: Inbound): InboundInput {
     transport: ib.transport,
     port: ib.port,
     address: ib.address,
+    nodeId: ib.nodeId ?? 0,
     target: ib.target ?? '',
     serverName: ib.serverName,
     fingerprint: ib.fingerprint ?? 'chrome',
@@ -361,6 +365,7 @@ const emptyInput: InboundInput = {
   transport: 'xhttp',
   port: 0,
   address: '',
+  nodeId: 0,
   target: 'www.microsoft.com',
   serverName: '',
   fingerprint: 'chrome',
@@ -386,6 +391,7 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
   const spec = protocolSpecs[p]
   const suggest = useQuery({ queryKey: ['inbounds', 'suggest', p], queryFn: () => api.inbounds.suggest(p), enabled: !inbound, staleTime: 0 })
   const domainInfo = useQuery({ queryKey: ['domain'], queryFn: api.domain.get, staleTime: 60_000 })
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.nodes.list, staleTime: 30_000 })
   // A trusted certificate is offered for TLS inbounds once the domain has one.
   const domainName = domainInfo.data?.cert && !domainInfo.data.cert.staging ? domainInfo.data.cert.domain : ''
   const [advanced, setAdvanced] = useState(false)
@@ -465,6 +471,21 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                 {spec.transports.map((tr) => (
                   <option key={tr} value={tr}>
                     {t(`inbounds.transportNames.${tr}`)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        )}
+
+        {(nodes.data?.length ?? 0) > 0 && (
+          <Field label={t('inbounds.server')} hint={t('inbounds.serverHint')} error={errors.nodeId}>
+            {(id) => (
+              <Select id={id} value={form.nodeId} onChange={(e) => setForm((f) => ({ ...f, nodeId: Number(e.target.value), hopPorts: '' }))}>
+                <option value={0}>{t('servers.thisServer')}</option>
+                {nodes.data?.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name} ({n.host})
                   </option>
                 ))}
               </Select>
@@ -559,6 +580,7 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                   </Field>
                 </div>
                 <p className="-mt-2 text-xs text-muted-foreground">{t('inbounds.bandwidthHint')}</p>
+                {form.nodeId === 0 && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t('inbounds.hopPorts')} hint={t('inbounds.hopPortsHint')} error={errors.hopPorts}>
                     {(id) => <Input id={id} value={form.hopPorts} onChange={(e) => set('hopPorts', e.target.value)} placeholder="20000-30000" />}
@@ -569,6 +591,7 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                     )}
                   </Field>
                 </div>
+                )}
                 {form.hopPorts && <p className="-mt-2 text-xs text-muted-foreground">{t('inbounds.hopIntervalNote')}</p>}
               </>
             )}

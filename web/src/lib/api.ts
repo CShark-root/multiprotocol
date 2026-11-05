@@ -234,6 +234,7 @@ export type ExpertInput = {
 
 export type Inbound = {
   id: number
+  nodeId: number
   remark: string
   protocol: Protocol
   transport: Transport
@@ -272,6 +273,7 @@ export type InboundInput = {
   transport: Transport
   port: number
   address: string
+  nodeId: number // сервер: 0 — этот
   target: string
   serverName: string
   fingerprint: string
@@ -339,6 +341,21 @@ export type SystemInfo = {
   } | null
 }
 
+// Другой наш сервер (узел) с агентом.
+export type ServerNode = {
+  id: number
+  name: string
+  host: string
+  createdAt: string
+  lastSeen: string
+  online: boolean
+  agentVersion?: string
+  health?: NonNullable<SystemInfo['localAgent']>
+  inSync: boolean
+  applyError?: string
+  users: number
+}
+
 export type TargetResult = {
   host: string
   ip?: string
@@ -403,6 +420,14 @@ export const api = {
     request<{ admin: Admin }>('POST', 'auth/login', code ? { username, password, code } : { username, password }),
   logout: () => request<void>('POST', 'auth/logout'),
   system: () => request<SystemInfo>('GET', 'system'),
+  nodes: {
+    list: () => request<ServerNode[]>('GET', 'nodes'),
+    create: (name: string, host: string) => request<{ node: ServerNode; command: string }>('POST', 'nodes', { name, host }),
+    update: (id: number, name: string, host: string) => request<ServerNode>('PUT', `nodes/${id}`, { name, host }),
+    remove: (id: number) => request<void>('DELETE', `nodes/${id}`),
+    token: (id: number) => request<{ command: string }>('POST', `nodes/${id}/token`),
+    restart: (id: number) => request<void>('POST', `nodes/${id}/restart`),
+  },
   domain: {
     get: () => request<DomainInfo>('GET', 'domain'),
     save: (d: { name: string; token: string; ipMode: string; ip: string; staging: boolean }) => request<DomainInfo>('PUT', 'domain', d),

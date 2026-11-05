@@ -43,3 +43,5 @@ echo "==> verify"
 mkdir "$TMP/pkg"
 tar -xzf "$TMP/$ASSET" -C "$TMP/pkg"
 bash "$TMP/pkg/remote-install.sh" "$TMP/pkg"
+# Узел (агент другого сервера) remote-install.sh уже запустил — панели здесь нет.
+[[ -f /var/lib/panel/agent.json ]] && exit 0

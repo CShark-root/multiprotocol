@@ -38,7 +38,7 @@ jobs:
               -ldflags "-s -w -X panel/internal/shared/version.Version=$VERSION" \
               -o "$PKG/panel-linux-$ARCH" ./cmd/panel
             cp install.sh deploy/remote-install.sh deploy/panel.service deploy/panel-amnezia.service deploy/panel-net.service \
-               deploy/panel-update.service deploy/panel-update.path deploy/panel-update.sh deploy/update-cores.sh \
+               deploy/panel-update.service deploy/panel-update.path deploy/panel-update.sh deploy/update-cores.sh deploy/panel-agent.service \
                scripts/install-xray.sh scripts/install-hysteria.sh scripts/install-singbox.sh "$PKG/"
             tar -czf "dist/multiprotocol-linux-$ARCH.tar.gz" -C "$PKG" .
             (cd dist && sha256sum "multiprotocol-linux-$ARCH.tar.gz" > "multiprotocol-linux-$ARCH.tar.gz.sha256")

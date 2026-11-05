@@ -26,6 +26,7 @@ type inboundDTO struct {
 	Address   string    `json:"address"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
+	NodeID    int64     `json:"nodeId"` // сервер: 0 — этот
 
 	// VLESS + Reality
 	Target          string `json:"target,omitempty"`
@@ -71,6 +72,7 @@ type inboundInputDTO struct {
 	HopPorts        string `json:"hopPorts"`
 	HopInterval     int    `json:"hopInterval"`
 	Enabled         *bool  `json:"enabled"` // omitted = true
+	NodeID          int64  `json:"nodeId"`
 
 	Expert service.ExpertInput `json:"expert"`
 }
@@ -80,7 +82,7 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	d := inboundDTO{
 		ID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport, Security: ib.Security,
 		Network: strings.Join(spec.Networks, "+"), Core: spec.Core, Apps: service.ClientApps(ib.Protocol), TestKit: ib.TestKit,
-		Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled, CreatedAt: ib.CreatedAt,
+		Port: ib.Port, Address: ib.Address, Enabled: ib.Enabled, CreatedAt: ib.CreatedAt, NodeID: ib.NodeID,
 	}
 	if r := ib.Settings.Reality; r != nil {
 		d.Target, d.Fingerprint, d.PublicKey = r.Target, r.Fingerprint, r.PublicKey
@@ -135,6 +137,7 @@ func (in inboundInputDTO) toInput() service.InboundInput {
 		Obfs: in.Obfs, Masquerade: in.Masquerade, UpMbps: in.UpMbps, DownMbps: in.DownMbps,
 		HopPorts: in.HopPorts, HopInterval: in.HopInterval,
 		Expert: in.Expert,
+		NodeID: in.NodeID,
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"panel/internal/agent"
 	"panel/internal/amnezia"
+	"panel/internal/nodeproto"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/journal"
 	"panel/internal/panel/service"
@@ -36,6 +37,8 @@ type Deps struct {
 	Scanner    *service.Scanner
 	Routing    *service.Routing
 	Cores      *service.CoreUpdater // nil без локального агента
+	Nodes      *service.Nodes       // nil без локального агента
+	CertPin    string               // SHA-256 самоподписанного сертификата панели (hex); "" — сертификат от CA
 	Domains    *service.Domains
 	Telegram   *service.Notifier
 	Amnezia    *amnezia.HelperClient // nil: no Amnezia tab data
@@ -55,18 +58,22 @@ type server struct {
 	prefix       string // "/<basePath>"
 	loginLimiter *rateLimiter
 	onlineCache  *onlineCache
+	nodeLimiter  *rateLimiter
 }
 
 func New(d Deps) http.Handler {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	s := &server{Deps: d, prefix: "/" + d.BasePath, loginLimiter: newRateLimiter(10, time.Minute), onlineCache: &onlineCache{}}
+	s := &server{Deps: d, prefix: "/" + d.BasePath, loginLimiter: newRateLimiter(10, time.Minute), onlineCache: &onlineCache{}, nodeLimiter: newRateLimiter(30, time.Minute)}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(s.securityHeaders)
 	r.Route(s.prefix, func(r chi.Router) {
+		// Агенты других серверов: свой токен вместо сессии, чужим — пустая 404.
+		r.Post(nodeproto.Path+"/sync", s.nodeAuth(s.nodeSync))
+		r.Get(nodeproto.Path+"/file", s.nodeAuth(s.nodeFile))
 		r.Route("/api", func(r chi.Router) {
 			r.Use(noStore, s.logRequests, s.checkWrites)
 			r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +98,12 @@ func New(d Deps) http.Handler {
 				r.Get("/system/update", s.updateStatus)
 				r.Post("/system/update", s.startUpdate)
 				r.Get("/system/cores-auto", s.coresAuto)
+				r.Get("/nodes", s.listNodes)
+				r.Post("/nodes", s.createNode)
+				r.Put("/nodes/{id}", s.updateNode)
+				r.Delete("/nodes/{id}", s.deleteNode)
+				r.Post("/nodes/{id}/token", s.nodeToken)
+				r.Post("/nodes/{id}/restart", s.restartNode)
 				r.Put("/system/cores-auto", s.saveCoresAuto)
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/", s.listUsers)

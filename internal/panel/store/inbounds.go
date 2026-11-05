@@ -16,7 +16,8 @@ type Inbound struct {
 	Address   string
 	Settings  InboundSettings
 	Enabled   bool
-	TestKit   bool // created by the "test kit" button, removed with it
+	TestKit   bool  // created by the "test kit" button, removed with it
+	NodeID    int64 // сервер: 0 — этот, иначе узел из nodes
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -156,10 +157,11 @@ type InboundFields struct {
 	Settings  InboundSettings
 	Enabled   bool
 	TestKit   bool
+	NodeID    int64
 }
 
 const inboundColumns = `id, remark, protocol, transport, security, port, address, settings_json,
-	enabled, test_kit, created_at, updated_at`
+	enabled, test_kit, created_at, updated_at, node_id`
 
 func (s *Store) ListInbounds(ctx context.Context) ([]Inbound, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+inboundColumns+` FROM inbounds ORDER BY id`)
@@ -189,10 +191,10 @@ func (s *Store) CreateInbound(ctx context.Context, f InboundFields, now time.Tim
 		return Inbound{}, err
 	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO inbounds
-		(remark, protocol, transport, security, port, address, settings_json, enabled, test_kit, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(remark, protocol, transport, security, port, address, settings_json, enabled, test_kit, created_at, updated_at, node_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled, f.TestKit,
-		now.Unix(), now.Unix())
+		now.Unix(), now.Unix(), f.NodeID)
 	if err != nil {
 		return Inbound{}, err
 	}
@@ -210,9 +212,9 @@ func (s *Store) UpdateInbound(ctx context.Context, id int64, f InboundFields, no
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE inbounds SET
 		remark = ?, protocol = ?, transport = ?, security = ?, port = ?, address = ?, settings_json = ?,
-		enabled = ?, updated_at = ? WHERE id = ?`,
+		enabled = ?, updated_at = ?, node_id = ? WHERE id = ?`,
 		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled,
-		now.Unix(), id)
+		now.Unix(), f.NodeID, id)
 	if err != nil {
 		return Inbound{}, err
 	}
@@ -242,7 +244,7 @@ func scanInbound(row scanner) (Inbound, error) {
 	var settings string
 	var enabled, testKit, created, updated int64
 	err := row.Scan(&in.ID, &in.Remark, &in.Protocol, &in.Transport, &in.Security, &in.Port, &in.Address,
-		&settings, &enabled, &testKit, &created, &updated)
+		&settings, &enabled, &testKit, &created, &updated, &in.NodeID)
 	if err != nil {
 		return Inbound{}, err
 	}

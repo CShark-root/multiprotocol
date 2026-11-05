@@ -64,6 +64,30 @@ net.core.wmem_max = 16777216
 SYSCTL
 sysctl -q -p /etc/sysctl.d/90-panel.conf || echo "note: some network settings were not applied" >&2
 
+# Узел: на этом сервере только агент, конфиги он берёт у главной панели.
+# NODE_JOIN — код из вкладки «Серверы»; agent.json — узел уже подключён
+# (повторный запуск обновляет агента).
+if [[ -n ${NODE_JOIN:-} || -f /var/lib/panel/agent.json ]]; then
+  if [[ -f /var/lib/panel/panel.db ]]; then
+    echo "На этом сервере уже работает главная панель — узлом его сделать нельзя." >&2
+    exit 1
+  fi
+  install -d -m 0700 -o panel -g panel /var/lib/panel
+  install -m 0644 "$SRC/panel-agent.service" /etc/systemd/system/panel-agent.service
+  if [[ -n ${NODE_JOIN:-} ]]; then
+    sudo -u panel /usr/local/bin/panel agent-join -data-dir /var/lib/panel "$NODE_JOIN"
+  fi
+  echo "==> restart"
+  systemctl daemon-reload
+  systemctl enable panel-agent >/dev/null 2>&1
+  systemctl restart panel-agent
+  sleep 2
+  systemctl --no-pager --lines=5 status panel-agent || true
+  echo
+  echo "Узел подключён. Он появится во вкладке «Серверы» главной панели через несколько секунд."
+  exit 0
+fi
+
 # The one extra right the panel gets: rebooting the machine from the
 # dashboard (logind asks polkit). "multiple-sessions" covers an open SSH login.
 if [[ -d /etc/polkit-1/localauthority ]]; then # polkit 0.105 (Ubuntu 22.04)

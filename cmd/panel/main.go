@@ -36,6 +36,7 @@ import (
 	"panel/internal/agent/xray"
 	"panel/internal/amnezia"
 	"panel/internal/nethelper"
+	"panel/internal/nodeagent"
 	"panel/internal/panel/api"
 	"panel/internal/panel/auth"
 	"panel/internal/panel/backup"
@@ -71,6 +72,10 @@ func main() {
 			os.Exit(netHelper(os.Args[2:]))
 		case "amnezia-helper":
 			os.Exit(amneziaHelper(os.Args[2:]))
+		case "agent":
+			os.Exit(agentCmd(os.Args[2:]))
+		case "agent-join":
+			os.Exit(agentJoin(os.Args[2:]))
 		}
 	}
 	os.Exit(serve(os.Args[1:]))
@@ -147,6 +152,7 @@ func serve(args []string) int {
 	}
 	var routingSvc *service.Routing
 	var coreUpdater *service.CoreUpdater
+	var nodesSvc *service.Nodes
 	if *xrayAPI == "auto" {
 		// A fixed port would clash with other Xray installs on the same
 		// machine (3x-ui uses 62789); the API is only ever reached locally.
@@ -173,6 +179,10 @@ func serve(args []string) int {
 		if a := amneziaClient(*dev); a != nil {
 			syncer.SetAmnezia(a)
 		}
+		nodesSvc = service.NewNodes(st, events, *dataDir, log)
+		nodesSvc.SetChanged(syncer.Trigger)
+		syncer.SetNodes(nodesSvc)
+		go nodesSvc.RunWatch(ctx)
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)
 		go routingSvc.RunWarpWatch(ctx, func() error { return localAgent.RestartCore("xray") })
@@ -216,7 +226,7 @@ func serve(args []string) int {
 	go notifier.Run(ctx)
 	usersSvc := service.NewUsers(st, changed)
 	go service.NewBot(service.BotDeps{
-		Notifier: notifier, Users: usersSvc, Agent: localAgent, Reboot: rebootFunc(*dev), SubBase: subBase, Log: log,
+		Notifier: notifier, Users: usersSvc, Agent: localAgent, Nodes: nodesSvc, Reboot: rebootFunc(*dev), SubBase: subBase, Log: log,
 	}).Run(ctx)
 
 	handler := api.New(api.Deps{
@@ -234,6 +244,8 @@ func serve(args []string) int {
 		Scanner:    service.NewScanner(),
 		Routing:    routingSvc,
 		Cores:      coreUpdater,
+		Nodes:      nodesSvc,
+		CertPin:    certPin(*dev, *dataDir, cfg),
 		Reboot:     rebootFunc(*dev),
 		Panel:      api.PanelConfig{DataDir: *dataDir, Current: stored, Restart: restart},
 		Agent:      localAgent,
@@ -658,5 +670,78 @@ func netHelper(args []string) int {
 		log.Error("net helper", "err", err)
 		return 1
 	}
+	return 0
+}
+
+// certPin — отпечаток самоподписанного сертификата панели: агент на другом
+// сервере закрепляет его, когда панель открыта по IP.
+func certPin(dev bool, dataDir string, cfg config.Config) string {
+	if dev {
+		return ""
+	}
+	cert, err := loadCert(dataDir, cfg)
+	if err != nil {
+		return ""
+	}
+	return tlsutil.Fingerprint(cert)
+}
+
+// agentCmd — агент на другом нашем сервере: запускает ядра и берёт конфиги
+// у главной панели (agent.json пишет agent-join).
+func agentCmd(args []string) int {
+	fsFlags := flag.NewFlagSet("agent", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "/var/lib/panel", "каталог данных узла")
+	xrayBin := fsFlags.String("xray-bin", defaultXrayBin(), "path to the xray binary")
+	hysteriaBin := fsFlags.String("hysteria-bin", defaultCoreBin("hysteria", "hysteria"), "path to the Hysteria 2 binary")
+	singboxBin := fsFlags.String("singbox-bin", defaultCoreBin("sing-box", "sing-box"), "path to the sing-box binary")
+	fsFlags.Parse(args)
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg, err := nodeagent.LoadConfig(*dataDir)
+	if err != nil {
+		log.Error("agent.json: run `panel agent-join CODE` first", "err", err)
+		return 1
+	}
+	if err := nodeagent.PickXrayAPI(*dataDir, &cfg); err != nil {
+		log.Error("pick a port for the xray api", "err", err)
+		return 1
+	}
+	xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), filepath.Join(*dataDir, "geo"), cfg.XrayAPI, log)
+	hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
+	sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
+	cores := agent.New(xr, hy, sb)
+	defer cores.Stop()
+	a, err := nodeagent.New(*dataDir, cfg, cores, log)
+	if err != nil {
+		log.Error("agent", "err", err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log.Info("agent started", "version", version.Version, "panel", redactURL(cfg.URL))
+	a.Run(ctx)
+	return 0
+}
+
+// redactURL прячет секретный путь панели в журнале.
+func redactURL(u string) string {
+	if i := strings.Index(strings.TrimPrefix(u, "https://"), "/"); i >= 0 {
+		return u[:len("https://")+i] + "/…"
+	}
+	return u
+}
+
+func agentJoin(args []string) int {
+	fsFlags := flag.NewFlagSet("agent-join", flag.ExitOnError)
+	dataDir := fsFlags.String("data-dir", "/var/lib/panel", "каталог данных узла")
+	fsFlags.Parse(args)
+	if fsFlags.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: panel agent-join [-data-dir DIR] CODE")
+		return 2
+	}
+	if err := nodeagent.Join(*dataDir, fsFlags.Arg(0)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println("агент подключён к панели")
 	return 0
 }

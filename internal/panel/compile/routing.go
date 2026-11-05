@@ -131,3 +131,22 @@ func dnsAvailable(d routing.DNSSettings, has func(string) bool) routing.DNSSetti
 	}
 	return out
 }
+
+// ForNode — маршрутизация для другого нашего сервера. Устройство WARP одно,
+// и с двух серверов сразу оно работать не может, поэтому на узлах всё, что
+// шло в WARP, идёт напрямую. Мост WARP там тоже не нужен.
+func (rt Routing) ForNode() Routing {
+	out := rt
+	out.Warp, out.Bridge = nil, routing.Bridge{}
+	if out.Final == routing.WARP {
+		out.Final = routing.Direct
+	}
+	out.Rules = make([]routing.Final, len(rt.Rules))
+	for i, r := range rt.Rules {
+		if r.Outbound == routing.WARP {
+			r.Outbound = routing.Direct
+		}
+		out.Rules[i] = r
+	}
+	return out
+}

@@ -8,6 +8,7 @@ import (
 
 	"panel/internal/agent"
 	"panel/internal/panel/compile"
+	"panel/internal/panel/service"
 	"panel/internal/panel/store"
 )
 
@@ -48,6 +49,7 @@ func (s *server) onlineNow(r *http.Request) ([]onlineDTO, error) {
 		return c.list, nil
 	}
 	m, err := s.Agent.Online(r.Context())
+	m = service.MergeOnline(m, s.Nodes)
 	c.list, c.at = toOnlineDTO(m), time.Now()
 	return c.list, err
 }

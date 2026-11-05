@@ -37,6 +37,8 @@ var notifyAlias = map[string]string{
 	EventWarpRecovered: EventWarpRestarted,
 	EventCoresUpdated:  EventCoreUp,
 	EventCoresRollback: EventCoreDown,
+	EventNodeDown:      EventCoreDown,
+	EventNodeUp:        EventCoreUp,
 }
 
 // NotifyEvents are the event types a bot can report, in display order.
@@ -199,6 +201,10 @@ func eventText(e store.Event, name string) string {
 			return "🔄 WARP не отвечал — переключаю на " + ep + ": " + e.Message
 		}
 		return "🔄 WARP не отвечал — Xray перезапущен: " + e.Message
+	case EventNodeDown:
+		return "⚠️ Сервер «" + str(d, "node") + "» не выходит на связь"
+	case EventNodeUp:
+		return "✅ Сервер «" + str(d, "node") + "» снова на связи"
 	case EventCoresUpdated:
 		return "⬆️ " + str(d, "core") + " обновлён: " + str(d, "from") + " → " + str(d, "to")
 	case EventCoresRollback:

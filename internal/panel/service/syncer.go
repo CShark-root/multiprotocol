@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ type Syncer struct {
 
 	amnezia     AmneziaClients  // nil: без связки с Amnezia
 	amneziaSeen *amnezia.Status // что помощник показал в этом круге
+	nodes       *Nodes          // nil: только этот сервер
 }
 
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {
@@ -163,6 +165,9 @@ func (s *Syncer) watchCores(ctx context.Context) {
 
 func (s *Syncer) collect(ctx context.Context) error {
 	deltas, err := s.agent.Traffic(ctx)
+	if s.nodes != nil {
+		deltas = append(deltas, s.nodes.TakeTraffic()...)
+	}
 	byUser := map[int64]int64{}
 	for _, d := range deltas {
 		if id, ok := compile.UserIDFromEmail(d.Email); ok {
@@ -205,6 +210,9 @@ func (s *Syncer) apply(ctx context.Context) error {
 			return err
 		}
 	}
+	all := inbounds
+	inbounds = onNode(all, 0)
+	s.applyNodes(ctx, all, active, rt)
 	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr, rt)
 	if err != nil {
 		return err
@@ -259,3 +267,53 @@ func (s *Syncer) applyHops(ctx context.Context, inbounds []store.Inbound) {
 }
 
 const EventHopFailed = "hop.failed"
+
+// SetNodes подключает другие наши серверы. Вызывать до Run.
+func (s *Syncer) SetNodes(n *Nodes) { s.nodes = n }
+
+func onNode(list []store.Inbound, node int64) []store.Inbound {
+	out := []store.Inbound{}
+	for _, ib := range list {
+		if ib.NodeID == node {
+			out = append(out, ib)
+		}
+	}
+	return out
+}
+
+// applyNodes собирает конфиги для каждого узла. Узел, который ещё ни разу
+// не приходил, ждёт: без адреса его API Xray конфиг не собрать.
+func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []store.User, rt compile.Routing) {
+	if s.nodes == nil {
+		return
+	}
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		s.log.Warn("list nodes", "err", err)
+		return
+	}
+	nrt := rt.ForNode()
+	var files []string
+	if s.routing != nil {
+		g := s.routing.GeoDir()
+		files = append(files, filepath.Join(g, "geoip.dat"), filepath.Join(g, "geosite.dat"))
+		if nrt.GeoDir != "" && nrt.GeoDir != g {
+			files = append(files, filepath.Join(nrt.GeoDir, "geoip.dat"), filepath.Join(nrt.GeoDir, "geosite.dat"))
+		}
+	}
+	for _, node := range nodes {
+		api := s.nodes.XrayAPI(node.ID)
+		if api == "" {
+			continue
+		}
+		ibs := onNode(all, node.ID)
+		xr, err1 := compile.Xray(ibs, active, api, nrt)
+		hy, err2 := compile.Hysteria(ibs, active, nrt)
+		sb, err3 := compile.SingBox(ibs, active, nrt)
+		if err := errors.Join(err1, err2, err3); err != nil {
+			s.log.Warn("compile node config", "node", node.Name, "err", err)
+			continue
+		}
+		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb}, files)
+	}
+}
