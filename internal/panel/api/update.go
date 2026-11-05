@@ -131,7 +131,7 @@ func (s *server) coresAuto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": s.Cores.Get(r.Context())})
+	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": s.Cores.Get(r.Context()), "clock": serverClock()})
 }
 
 func (s *server) saveCoresAuto(w http.ResponseWriter, r *http.Request) {
@@ -157,5 +157,13 @@ func (s *server) saveCoresAuto(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.AddAudit(r.Context(), store.AuditEntry{AdminID: adminFrom(r.Context()).ID, Action: "cores.auto", TargetType: "system",
 		Diff: map[string]any{"enabled": in.Enabled, "hour": in.Hour}}, time.Now())
-	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": out})
+	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "settings": out, "clock": serverClock()})
+}
+
+// serverClock — часы сервера: время проверки ядер задаётся по ним, а у админа
+// в браузере может быть другой часовой пояс.
+func serverClock() map[string]any {
+	now := time.Now()
+	zone, offset := now.Zone()
+	return map[string]any{"time": now.Format("15:04"), "zone": zone, "offset": offset / 60}
 }

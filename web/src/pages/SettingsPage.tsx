@@ -1026,13 +1026,23 @@ function TelegramCard() {
 function CoresAutoCard() {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['cores-auto'], queryFn: api.update.coresAuto })
+  const q = useQuery({ queryKey: ['cores-auto'], queryFn: api.update.coresAuto, refetchInterval: 30_000 })
   const save = useMutation({
     mutationFn: (v: { enabled: boolean; hour: number }) => api.update.saveCoresAuto(v.enabled, v.hour),
     onSuccess: (d) => qc.setQueryData(['cores-auto'], d),
   })
   const s = q.data?.settings
   const last = s?.lastCheck && !s.lastCheck.startsWith('0001') ? new Date(s.lastCheck).toLocaleString(i18n.language) : ''
+  const clock = q.data?.clock
+  // Смещения от UTC в минутах: сервера и браузера.
+  const browserOffset = -new Date().getTimezoneOffset()
+  const sameZone = !clock || clock.offset === browserOffset
+  const utc = (m: number) => 'UTC' + (m >= 0 ? '+' : '−') + Math.floor(Math.abs(m) / 60) + (Math.abs(m) % 60 ? ':' + String(Math.abs(m) % 60).padStart(2, '0') : '')
+  // Час сервера h — сколько это на часах у админа.
+  const localHour = (h: number) => {
+    const m = (((h * 60 - (clock?.offset ?? 0) + browserOffset) % 1440) + 1440) % 1440
+    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+  }
   return (
     <Section icon={<RefreshCw className="h-4 w-4" />} title={t('update.autoTitle')} hint={t('update.autoHint')}>
       {!q.data ? (
@@ -1052,11 +1062,18 @@ function CoresAutoCard() {
                 {Array.from({ length: 24 }, (_, h) => (
                   <option key={h} value={h}>
                     {String(h).padStart(2, '0')}:00
+                    {!sameZone && ' ' + t('update.autoYours', { time: localHour(h) })}
                   </option>
                 ))}
                 </Select>
               )}
             </Field>
+          )}
+          {clock && (
+            <p className="text-sm">
+              {t('update.autoClock', { time: clock.time, zone: utc(clock.offset) })}
+              {!sameZone && <span className="text-muted-foreground"> · {t('update.autoBrowser', { zone: utc(browserOffset) })}</span>}
+            </p>
           )}
           <p className="text-xs text-muted-foreground">
             {last ? t('update.autoLast', { time: last }) : t('update.autoNever')}

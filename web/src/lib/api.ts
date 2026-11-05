@@ -510,4 +510,9 @@ export const api = {
 }
 
 // Автообновление ядер: настройки и итог последней ночной проверки.
-export type CoresAuto = { supported: boolean; settings?: { enabled: boolean; hour: number; lastCheck: string; lastError?: string } }
+export type CoresAuto = {
+  supported: boolean
+  settings?: { enabled: boolean; hour: number; lastCheck: string; lastError?: string }
+  // Часы сервера: "15:42", пояс и смещение от UTC в минутах.
+  clock?: { time: string; zone: string; offset: number }
+}
