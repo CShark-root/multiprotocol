@@ -171,6 +171,7 @@ func serve(args []string) int {
 		}
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)
+		go routingSvc.RunWarpWatch(ctx, func() error { return localAgent.RestartCore("xray") })
 	} else {
 		routingSvc = service.NewRouting(st, events, geoDir, nil, nil, log)
 	}
@@ -191,7 +192,12 @@ func serve(args []string) int {
 	}
 
 	inboundsSvc := service.NewInbounds(st, changed, panelPort)
-	inboundsSvc.UseDomainCerts(domains.CertFor)
+	inboundsSvc.UseDomainCerts(domains.CertFor, func() string {
+		if c := domains.Cert(); c != nil && time.Now().Before(c.NotAfter) && !strings.Contains(c.Issuer, "STAGING") {
+			return c.Domain
+		}
+		return ""
+	})
 	domains.OnCert(func(ctx context.Context, _ *domain.Cert) {
 		if err := inboundsSvc.RefreshDomainCerts(ctx); err != nil {
 			log.Warn("apply domain certificate to inbounds", "err", err)

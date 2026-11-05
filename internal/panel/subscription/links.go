@@ -116,8 +116,11 @@ func Hysteria2Link(ib store.Inbound, u store.User, host string) string {
 	q := url.Values{}
 	q.Set("sni", h.SNI)
 	if !h.DomainCert {
+		// Self-signed: pinned. Hysteria and most apps read pinSHA256; Xray 26
+		// cores (v2RayTun, v2rayNG) dropped "insecure" and read pcs.
 		q.Set("insecure", "1")
 		q.Set("pinSHA256", h.PinSHA256)
+		q.Set("pcs", h.PinSHA256)
 	}
 	if h.ObfsPassword != "" {
 		q.Set("obfs", "salamander")

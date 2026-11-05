@@ -594,3 +594,41 @@ func (r *Routing) Rollback(ctx context.Context, adminID int64, i int) (routing.S
 	}
 	return next, err
 }
+
+const EventWarpRestarted = "warp.restarted"
+
+// RunWarpWatch checks WARP every 5 minutes through its bridge and restarts
+// Xray (which holds the WireGuard session) after two failures in a row.
+func (r *Routing) RunWarpWatch(ctx context.Context, restartXray func() error) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	fails := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		s, err := r.Get(ctx)
+		if err != nil || !s.WarpUsable() || s.Bridge.Port == 0 {
+			fails = 0
+			continue
+		}
+		c, cancel := context.WithTimeout(ctx, 20*time.Second)
+		_, err = warp.Check(c, &s.Bridge)
+		cancel()
+		if err == nil {
+			fails = 0
+			continue
+		}
+		fails++
+		r.log.Warn("warp check failed", "err", err, "in_a_row", fails)
+		if fails >= 2 {
+			fails = 0
+			if rerr := restartXray(); rerr != nil {
+				r.log.Warn("restart xray for warp", "err", rerr)
+			}
+			r.events.Add(ctx, EventWarpRestarted, "warning", 0, err.Error(), nil)
+		}
+	}
+}

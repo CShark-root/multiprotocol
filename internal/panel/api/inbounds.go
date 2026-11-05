@@ -46,6 +46,7 @@ type inboundDTO struct {
 	HopPorts    string `json:"hopPorts,omitempty"`
 	HopInterval int    `json:"hopInterval,omitempty"`
 	CertPin     string `json:"certPin,omitempty"`
+	DomainCert  bool   `json:"domainCert,omitempty"` // a trusted certificate of the panel domain
 
 	Expert service.ExpertInput `json:"expert"`
 }
@@ -99,10 +100,11 @@ func toInboundDTO(ib store.Inbound) inboundDTO {
 	if h := ib.Settings.Hysteria; h != nil {
 		d.ServerName, d.Masquerade, d.UpMbps, d.DownMbps = h.SNI, h.Masquerade, h.UpMbps, h.DownMbps
 		d.Obfs, d.CertPin = h.ObfsPassword != "", h.PinSHA256
+		d.DomainCert = h.DomainCert
 		d.HopPorts, d.HopInterval = h.HopPorts, h.HopInterval
 	}
 	if t := ib.Settings.TLS; t != nil {
-		d.ServerName, d.CertPin = t.SNI, t.PinSHA256
+		d.ServerName, d.CertPin, d.DomainCert = t.SNI, t.PinSHA256, t.DomainCert
 	}
 	if ws := ib.Settings.WS; ws != nil {
 		d.WSPath = ws.Path

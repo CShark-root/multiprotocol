@@ -119,10 +119,11 @@ export function AppShell() {
       <aside className="hidden w-64 shrink-0 border-r bg-card/60 p-4 lg:block lg:sticky lg:top-0 lg:h-dvh">{sidebar}</aside>
 
       <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-3 backdrop-blur lg:hidden">
-        <span className="font-semibold tracking-tight">MultiProtocol</span>
+        {/* The menu slides in from the left, so its button sits on the left. */}
         <Button variant="ghost" size="icon" aria-label={t('nav.menu')} onClick={() => setOpen(true)}>
           <Menu className="h-5 w-5" />
         </Button>
+        <span className="font-semibold tracking-tight">MultiProtocol</span>
       </header>
       <div
         className={cn('fixed inset-0 z-20 bg-foreground/20 transition lg:hidden', open ? 'opacity-100' : 'pointer-events-none opacity-0')}

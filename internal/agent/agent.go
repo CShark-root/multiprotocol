@@ -123,3 +123,15 @@ func (a *Agent) RestartCores() error {
 	}
 	return errors.Join(errs...)
 }
+
+// RestartCore restarts one core by name (e.g. "xray").
+func (a *Agent) RestartCore(name string) error {
+	for _, ad := range a.adapters {
+		if ad.Name() == name {
+			if r, ok := ad.(interface{ Restart() error }); ok {
+				return r.Restart()
+			}
+		}
+	}
+	return nil
+}

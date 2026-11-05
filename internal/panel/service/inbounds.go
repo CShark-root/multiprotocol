@@ -133,11 +133,15 @@ type Inbounds struct {
 	// certFor returns the domain certificate when it covers an SNI (nil when
 	// there is no domain): such inbounds get a real certificate.
 	certFor func(sni string) *domain.Cert
+	// defaultSNI is the domain with a valid certificate, or "".
+	defaultSNI func() string
 }
 
 // UseDomainCerts makes inbounds whose SNI is the panel domain use its
 // certificate.
-func (s *Inbounds) UseDomainCerts(fn func(sni string) *domain.Cert) { s.certFor = fn }
+func (s *Inbounds) UseDomainCerts(fn func(sni string) *domain.Cert, domainName func() string) {
+	s.certFor, s.defaultSNI = fn, domainName
+}
 
 func NewInbounds(st *store.Store, changed func(), panelPort int) *Inbounds {
 	if changed == nil {
@@ -165,6 +169,11 @@ func (s *Inbounds) Create(ctx context.Context, adminID int64, in InboundInput) (
 }
 
 func (s *Inbounds) create(ctx context.Context, in InboundInput, testKit bool) (store.Inbound, error) {
+	// TLS protocols default to the panel domain when it has a certificate: a
+	// real certificate is the one every client app accepts.
+	if in.ServerName == "" && !testKit && s.defaultSNI != nil && (in.Protocol == "hysteria2" || in.Protocol == "tuic" || in.Protocol == "anytls") {
+		in.ServerName = s.defaultSNI()
+	}
 	f, err := s.normalize(ctx, in, nil)
 	if err != nil {
 		return store.Inbound{}, err

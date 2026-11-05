@@ -32,7 +32,7 @@ func TestDomainCertForInbounds(t *testing.T) {
 			return current
 		}
 		return nil
-	})
+	}, func() string { return "" })
 
 	// Created before the certificate exists: self-signed, pinned.
 	ib, err := svc.Create(ctx, 0, InboundInput{Remark: "hy", Protocol: "hysteria2", Port: 8443, ServerName: "myvpn.duckdns.org", Masquerade: "https://www.bing.com", Enabled: true})

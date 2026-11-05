@@ -254,6 +254,7 @@ export type Inbound = {
   hopPorts?: string
   hopInterval?: number
   certPin?: string
+  domainCert?: boolean
   expert: ExpertInput
   createdAt: string
 }

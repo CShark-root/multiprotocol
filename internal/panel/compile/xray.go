@@ -144,6 +144,8 @@ func xrayOutbounds(rt Routing) []any {
 				"address":   addrs,
 				"peers": []any{map[string]any{
 					"publicKey": w.PeerPublicKey, "endpoint": warpEndpoint(w.Endpoint),
+					// Keeps the session with Cloudflare alive between bursts of traffic.
+					"keepAlive":  25,
 					"allowedIPs": []string{"0.0.0.0/0", "::/0"},
 				}},
 				"reserved":       w.Reserved,

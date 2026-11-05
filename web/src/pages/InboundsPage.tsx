@@ -146,7 +146,7 @@ export function InboundsPage() {
       ) : (
         <div className="mt-1 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {inbounds.data.map((ib) => (
-            <Card key={ib.id} className={cn(!ib.enabled && 'opacity-70')}>
+            <Card key={ib.id} className={cn('min-w-0', !ib.enabled && 'opacity-70')}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{ib.remark}</div>
@@ -312,15 +312,21 @@ function InboundFacts({ ib }: { ib: Inbound }) {
   if (ib.protocol === 'shadowtls') facts.push([t('inbounds.handshake'), ib.target?.replace(/:443$/, '') ?? ''])
   if (ib.address) facts.push([t('inbounds.address'), ib.address])
   facts.push([t('inbounds.appsLabel'), ib.apps.map((a) => t(`inbounds.apps.${a}Short`)).join(', ')])
+  const selfSigned = (ib.protocol === 'hysteria2' || certProtocols.includes(ib.protocol)) && !ib.domainCert
   return (
-    <dl className="mt-4 space-y-1.5 text-sm">
-      {facts.map(([k, v]) => (
-        <div key={k} className="flex justify-between gap-4">
-          <dt className="text-muted-foreground">{k}</dt>
-          <dd className="truncate">{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <>
+      <dl className="mt-4 space-y-1.5 text-sm">
+        {facts.map(([k, v]) => (
+          <div key={k} className="flex min-w-0 justify-between gap-4">
+            <dt className="shrink-0 text-muted-foreground">{k}</dt>
+            <dd className="min-w-0 truncate text-right" title={v}>
+              {v}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {selfSigned && <p className="mt-3 rounded-xl bg-warning-soft px-3 py-2 text-xs text-warning">{t('inbounds.selfSignedWarn')}</p>}
+    </>
   )
 }
 
@@ -563,6 +569,7 @@ function InboundDialog({ inbound, onClose, onSaved }: { inbound: Inbound | null;
                     )}
                   </Field>
                 </div>
+                {form.hopPorts && <p className="-mt-2 text-xs text-muted-foreground">{t('inbounds.hopIntervalNote')}</p>}
               </>
             )}
 
