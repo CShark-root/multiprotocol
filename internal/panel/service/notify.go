@@ -129,7 +129,12 @@ func (n *Notifier) onEvent(e store.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s := n.Get(ctx)
-	if !n.ready(s) || !slices.Contains(s.Events, e.Type) {
+	// «WARP снова работает» включается тем же переключателем, что и «WARP не отвечал».
+	typ := e.Type
+	if typ == EventWarpRecovered {
+		typ = EventWarpRestarted
+	}
+	if !n.ready(s) || !slices.Contains(s.Events, typ) {
 		return
 	}
 	name := ""
@@ -183,7 +188,12 @@ func eventText(e store.Event, name string) string {
 	case EventAmneziaDown:
 		return "⚠️ Контейнер Amnezia " + str(d, "container") + " остановился: " + e.Message
 	case EventWarpRestarted:
+		if ep := str(d, "endpoint"); ep != "" {
+			return "🔄 WARP не отвечал — переключаю на " + ep + ": " + e.Message
+		}
 		return "🔄 WARP не отвечал — Xray перезапущен: " + e.Message
+	case EventWarpRecovered:
+		return "✅ WARP снова работает (" + str(d, "endpoint") + ", перерыв " + str(d, "minutes") + " мин)"
 	case EventAmneziaUp:
 		return "✅ Контейнер Amnezia " + str(d, "container") + " снова работает"
 	}

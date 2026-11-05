@@ -17,6 +17,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -283,4 +284,18 @@ func dialSOCKS(ctx context.Context, proxy, user, pass, addr string) (net.Conn, e
 	}
 	conn.SetDeadline(time.Time{})
 	return conn, nil
+}
+
+// Ports — порты WireGuard, на которых отвечает WARP. Если провайдер VPS
+// режет один, сторож переходит на следующий.
+var Ports = []string{"2408", "500", "1701", "4500", "854", "4233"}
+
+// NextEndpoint возвращает тот же адрес на следующем порту из Ports.
+func NextEndpoint(ep string) string {
+	h, p, err := net.SplitHostPort(ep)
+	if err != nil {
+		return endpoint(ep)
+	}
+	i := slices.Index(Ports, p)
+	return net.JoinHostPort(h, Ports[(i+1)%len(Ports)])
 }

@@ -28,7 +28,7 @@ import {
   type User,
 } from '@/lib/api'
 import { formatBytes } from '@/lib/utils'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab } from '@/components/ui'
 
 const outbounds: Outbound[] = ['direct', 'block', 'warp', 'ipv4']
 // Labels for outbounds, including the admin's own exits ("out:<id>").
@@ -75,8 +75,11 @@ function ToggleRow({ title, hint, checked, onChange, disabled }: { title: string
   )
 }
 
+const routingTabs = ['basic', 'rules', 'exits', 'dns', 'history'] as const
+
 export function RoutingPage() {
   const { t } = useTranslation()
+  const [tab, choose] = useSavedTab('routing.tab', routingTabs)
   const qc = useQueryClient()
   const routing = useQuery({ queryKey: ['routing'], queryFn: api.routing.get })
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
@@ -115,31 +118,42 @@ export function RoutingPage() {
   return (
     <>
       <PageHeader title={t('routing.title')} subtitle={t('routing.subtitle')} />
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="mx-auto max-w-3xl">
+        <Tabs tabs={routingTabs} value={tab} onChange={choose} label={(v) => t(`routing.tab_${v}`)} />
         <div className="space-y-4">
-          <Section icon={<ShieldCheck className="h-5 w-5" />} title={t('routing.protection')} hint={t('routing.protectionHint')}>
-            <div className="divide-y">
-              {(['blockPrivate', 'blockSmtp', 'blockBittorrent', 'blockAds', 'googleIpv4'] as const).map((k) => (
-                <ToggleRow
-                  key={k}
-                  title={t(`routing.presets.${k}`)}
-                  hint={t(`routing.presets.${k}Hint`)}
-                  checked={s.presets[k]}
-                  onChange={(v) => edit((d) => (d.presets[k] = v))}
-                />
-              ))}
-            </div>
-          </Section>
-          <CountriesCard s={s} edit={edit} />
-          <ClientCard s={s} edit={edit} />
-          <WarpCard s={s} edit={edit} onServer={accept} />
-        </div>
-        <div className="space-y-4">
-          <RulesCard s={s} edit={edit} users={users.data ?? []} />
-          <OutboundsCard s={s} edit={edit} />
-          <DnsCard s={s} edit={edit} />
-          <GeoCard s={s} edit={edit} />
-          <HistoryCard onServer={accept} />
+          {tab === 'basic' && (
+            <>
+              <Section icon={<ShieldCheck className="h-5 w-5" />} title={t('routing.protection')} hint={t('routing.protectionHint')}>
+                <div className="divide-y">
+                  {(['blockPrivate', 'blockSmtp', 'blockBittorrent', 'blockAds', 'googleIpv4'] as const).map((k) => (
+                    <ToggleRow
+                      key={k}
+                      title={t(`routing.presets.${k}`)}
+                      hint={t(`routing.presets.${k}Hint`)}
+                      checked={s.presets[k]}
+                      onChange={(v) => edit((d) => (d.presets[k] = v))}
+                    />
+                  ))}
+                </div>
+              </Section>
+              <CountriesCard s={s} edit={edit} />
+              <ClientCard s={s} edit={edit} />
+            </>
+          )}
+          {tab === 'rules' && (
+            <>
+              <RulesCard s={s} edit={edit} users={users.data ?? []} />
+              <GeoCard s={s} edit={edit} />
+            </>
+          )}
+          {tab === 'exits' && (
+            <>
+              <WarpCard s={s} edit={edit} onServer={accept} />
+              <OutboundsCard s={s} edit={edit} />
+            </>
+          )}
+          {tab === 'dns' && <DnsCard s={s} edit={edit} />}
+          {tab === 'history' && <HistoryCard onServer={accept} />}
         </div>
       </div>
 

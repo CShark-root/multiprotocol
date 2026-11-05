@@ -595,14 +595,19 @@ func (r *Routing) Rollback(ctx context.Context, adminID int64, i int) (routing.S
 	return next, err
 }
 
-const EventWarpRestarted = "warp.restarted"
+const (
+	EventWarpRestarted = "warp.restarted"
+	EventWarpRecovered = "warp.recovered"
+)
 
-// RunWarpWatch checks WARP every 5 minutes through its bridge and restarts
-// Xray (which holds the WireGuard session) after two failures in a row.
+// RunWarpWatch раз в 5 минут проверяет WARP через мост. После двух неудач
+// подряд переводит WARP на следующий порт (новый конфиг перезапускает Xray,
+// который держит сессию WireGuard). Когда WARP снова ответил — сообщает.
 func (r *Routing) RunWarpWatch(ctx context.Context, restartXray func() error) {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	fails := 0
+	var downSince time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -611,7 +616,7 @@ func (r *Routing) RunWarpWatch(ctx context.Context, restartXray func() error) {
 		}
 		s, err := r.Get(ctx)
 		if err != nil || !s.WarpUsable() || s.Bridge.Port == 0 {
-			fails = 0
+			fails, downSince = 0, time.Time{}
 			continue
 		}
 		c, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -619,16 +624,49 @@ func (r *Routing) RunWarpWatch(ctx context.Context, restartXray func() error) {
 		cancel()
 		if err == nil {
 			fails = 0
+			if !downSince.IsZero() {
+				mins := int(r.now().Sub(downSince).Minutes())
+				r.events.Add(ctx, EventWarpRecovered, "info", 0, "", map[string]any{"endpoint": s.WARP.Account.Endpoint, "minutes": mins})
+				downSince = time.Time{}
+			}
 			continue
 		}
 		fails++
 		r.log.Warn("warp check failed", "err", err, "in_a_row", fails)
-		if fails >= 2 {
-			fails = 0
+		if fails < 2 {
+			continue
+		}
+		fails = 0
+		if downSince.IsZero() {
+			downSince = r.now()
+		}
+		ep, rerr := r.rotateWarp(ctx)
+		if rerr != nil {
+			// Не вышло сменить порт — хотя бы перезапускаем Xray.
+			r.log.Warn("rotate warp endpoint", "err", rerr)
 			if rerr := restartXray(); rerr != nil {
 				r.log.Warn("restart xray for warp", "err", rerr)
 			}
-			r.events.Add(ctx, EventWarpRestarted, "warning", 0, err.Error(), nil)
 		}
+		r.events.Add(ctx, EventWarpRestarted, "warning", 0, err.Error(), map[string]any{"endpoint": ep})
 	}
+}
+
+// rotateWarp переводит WARP на следующий порт и применяет конфиг.
+func (r *Routing) rotateWarp(ctx context.Context) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, err := r.Get(ctx)
+	if err != nil {
+		return "", err
+	}
+	if s.WARP.Account == nil {
+		return "", ErrNoWarp
+	}
+	s.WARP.Account.Endpoint = warp.NextEndpoint(s.WARP.Account.Endpoint)
+	if err := r.store.SetSetting(ctx, routingKey, s); err != nil {
+		return "", err
+	}
+	r.changed()
+	return s.WARP.Account.Endpoint, nil
 }

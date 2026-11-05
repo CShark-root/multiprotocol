@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -201,6 +201,49 @@ export function EmptyState({ icon, title, text, action }: { icon: ReactNode; tit
       <h3 className="font-semibold">{title}</h3>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">{text}</p>
       {action && <div className="mt-5">{action}</div>}
+    </div>
+  )
+}
+
+// useSavedTab запоминает выбранную вкладку страницы в localStorage (если браузер разрешает).
+export function useSavedTab<T extends string>(key: string, tabs: readonly T[]): [T, (v: T) => void] {
+  const [tab, setTab] = useState<T>(() => {
+    try {
+      const v = localStorage.getItem(key)
+      return tabs.includes(v as T) ? (v as T) : tabs[0]
+    } catch {
+      return tabs[0]
+    }
+  })
+  const choose = (v: T) => {
+    setTab(v)
+    try {
+      localStorage.setItem(key, v)
+    } catch {
+      // приватный режим: вкладка просто не запомнится
+    }
+  }
+  return [tab, choose]
+}
+
+export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: readonly T[]; value: T; onChange: (v: T) => void; label: (v: T) => ReactNode }) {
+  return (
+    <div role="tablist" className="mb-5 flex gap-1 overflow-x-auto rounded-2xl border bg-card p-1">
+      {tabs.map((v) => (
+        <button
+          key={v}
+          role="tab"
+          type="button"
+          aria-selected={value === v}
+          onClick={() => onChange(v)}
+          className={cn(
+            'flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition',
+            value === v ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {label(v)}
+        </button>
+      ))}
     </div>
   )
 }

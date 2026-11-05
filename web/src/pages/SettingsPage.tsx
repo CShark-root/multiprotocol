@@ -3,54 +3,20 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, type PanelSettings } from '@/lib/api'
-import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select } from '@/components/ui'
+import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Tabs, useSavedTab } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
-import { cn } from '@/lib/utils'
 
 const tabs = ['access', 'security', 'maintenance'] as const
 type Tab = (typeof tabs)[number]
 
-function savedTab(): Tab {
-  try {
-    const v = localStorage.getItem('settings.tab')
-    return tabs.includes(v as Tab) ? (v as Tab) : 'access'
-  } catch {
-    return 'access'
-  }
-}
-
 export function SettingsPage() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<Tab>(savedTab)
-  const choose = (v: Tab) => {
-    setTab(v)
-    try {
-      localStorage.setItem('settings.tab', v)
-    } catch {
-      // private mode: the tab is just not remembered
-    }
-  }
+  const [tab, choose] = useSavedTab<Tab>('settings.tab', tabs)
   return (
     <>
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
       <div className="mx-auto max-w-3xl">
-        <div role="tablist" className="mb-5 flex gap-1 rounded-2xl border bg-card p-1">
-          {tabs.map((v) => (
-            <button
-              key={v}
-              role="tab"
-              type="button"
-              aria-selected={tab === v}
-              onClick={() => choose(v)}
-              className={cn(
-                'flex-1 rounded-xl px-3 py-2 text-sm transition',
-                tab === v ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t(`settings.tab_${v}`)}
-            </button>
-          ))}
-        </div>
+        <Tabs tabs={tabs} value={tab} onChange={choose} label={(v) => t(`settings.tab_${v}`)} />
         <div className="space-y-4">
           {tab === 'access' && (
             <>
