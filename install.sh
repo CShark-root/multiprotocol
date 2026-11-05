@@ -35,8 +35,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 echo "==> download"
 echo "Downloading $ASSET ($VERSION) from github.com/$REPO"
-curl -fsSL --retry 3 -o "$TMP/$ASSET" "$BASE/$ASSET"
-curl -fsSL --retry 3 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
+# GitHub иногда отвечает 502/504, особенно в первые минуты после выхода релиза: ждём и повторяем.
+curl -fsSL --retry 6 --retry-delay 10 -o "$TMP/$ASSET" "$BASE/$ASSET"
+curl -fsSL --retry 6 --retry-delay 10 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
 echo "==> verify"
 (cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null) || { echo "checksum mismatch, aborting" >&2; exit 1; }
 
