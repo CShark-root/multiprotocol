@@ -83,11 +83,11 @@ func (c *CoreUpdater) Supported() bool {
 	return err == nil
 }
 
-// Run сначала сообщает итог прошлого обновления, затем раз в 10 минут
-// смотрит, не пора ли проверить версии.
+// Run раз в минуту сообщает итог обновления, если скрипт его оставил (он пишет
+// итог уже после перезапуска панели), и смотрит, не пора ли проверить версии.
 func (c *CoreUpdater) Run(ctx context.Context) {
 	c.report(ctx)
-	t := time.NewTicker(10 * time.Minute)
+	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
 		select {
@@ -95,6 +95,7 @@ func (c *CoreUpdater) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		c.report(ctx)
 		s := c.Get(ctx)
 		now := c.now()
 		if !s.Enabled || !c.Supported() || now.Hour() != s.Hour || now.Sub(s.LastCheck) < 20*time.Hour {

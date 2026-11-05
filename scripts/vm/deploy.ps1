@@ -25,6 +25,7 @@ $files = @(
     "deploy\panel-update.service",
     "deploy\panel-update.path",
     "deploy\panel-update.sh",
+    "deploy\update-cores.sh",
     "install.sh",
     "deploy\remote-install.sh"
 ) | ForEach-Object { Join-Path $root $_ }

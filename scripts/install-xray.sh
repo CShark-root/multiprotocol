@@ -24,7 +24,8 @@ if [[ -z "$TAG" ]]; then
   # Read the whole response first: piping into `grep -m1` would close the
   # pipe early and make curl fail under pipefail.
   RELEASE=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
-  TAG=$(printf '%s\n' "$RELEASE" | grep '"tag_name"' | head -n1 | cut -d'"' -f4)
+  # JSON бывает и одной строкой — разбираем как JSON, а не grep'ом.
+  TAG=$(printf '%s' "$RELEASE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
 fi
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected tag: '$TAG'" >&2; exit 1; }
 

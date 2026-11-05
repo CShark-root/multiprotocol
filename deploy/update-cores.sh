@@ -33,6 +33,18 @@ config_ok() { # новый бинарь принимает текущий кон
 
 running() { pgrep -f "^$LIB/$1/$1 " >/dev/null; }
 
+# latest — версия последнего стабильного релиза без префикса (пусто, если GitHub молчит).
+latest() {
+  local repo prefix tag
+  case $1 in
+    xray) repo=XTLS/Xray-core prefix=v ;;
+    hysteria) repo=apernet/hysteria prefix=app/v ;;
+    sing-box) repo=SagerNet/sing-box prefix=v ;;
+  esac
+  tag=$(curl -fsSL -m 20 "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null)
+  [[ $tag == "$prefix"* ]] && echo "${tag#"$prefix"}"
+}
+
 restore() { # $1 = ядро
   mv -f "$LIB/$1/$1.prev" "$LIB/$1/$1"
 }
@@ -45,7 +57,12 @@ for core in xray hysteria sing-box; do
   [[ -x $bin && -f $script ]] || continue
   running "$core" && was_running[$core]=1
   old=$(version "$core")
-  echo "==> $core (сейчас $old)"
+  want=$(latest "$core")
+  if [[ -n $want && ${old#v} == "$want" ]]; then
+    echo "$core $old — последняя версия"
+    continue
+  fi
+  echo "==> $core (сейчас $old, доступна ${want:-?})"
   cp -a "$bin" "$bin.prev"
   if ! bash "$script"; then
     echo "установка $core не удалась, оставляю $old"
