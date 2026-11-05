@@ -115,3 +115,85 @@ func (b *Bot) FindChat(ctx context.Context) (*Chat, error) {
 	}
 	return nil, errors.New("no message yet: open the bot in Telegram and send /start")
 }
+
+// Button is one inline keyboard button; Data comes back in a callback.
+type Button struct {
+	Text string `json:"text"`
+	Data string `json:"callback_data"`
+}
+
+// Keyboard is rows of inline buttons.
+type Keyboard [][]Button
+
+func (b *Bot) post(ctx context.Context, method string, payload any, out any) error {
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, b.url(method), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return b.do(req, out)
+}
+
+func markup(kb Keyboard) map[string]any {
+	if kb == nil {
+		kb = Keyboard{}
+	}
+	return map[string]any{"inline_keyboard": kb}
+}
+
+// SendMenu posts a message with inline buttons and returns its id.
+func (b *Bot) SendMenu(ctx context.Context, chat int64, text string, kb Keyboard) (int64, error) {
+	var msg struct {
+		ID int64 `json:"message_id"`
+	}
+	err := b.post(ctx, "sendMessage", map[string]any{
+		"chat_id": chat, "text": text, "disable_web_page_preview": true, "reply_markup": markup(kb),
+	}, &msg)
+	return msg.ID, err
+}
+
+// EditMenu replaces the text and buttons of a message in place.
+func (b *Bot) EditMenu(ctx context.Context, chat, msgID int64, text string, kb Keyboard) error {
+	err := b.post(ctx, "editMessageText", map[string]any{
+		"chat_id": chat, "message_id": msgID, "text": text, "disable_web_page_preview": true, "reply_markup": markup(kb),
+	}, nil)
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+// Answer acknowledges a button press; text, when set, shows as a toast.
+func (b *Bot) Answer(ctx context.Context, callbackID, text string) error {
+	return b.post(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": callbackID, "text": text}, nil)
+}
+
+// Update is the part of a Telegram update the panel uses.
+type Update struct {
+	ID      int64 `json:"update_id"`
+	Message *struct {
+		ID   int64  `json:"message_id"`
+		Text string `json:"text"`
+		Chat struct {
+			ID   int64  `json:"id"`
+			Type string `json:"type"`
+		} `json:"chat"`
+	} `json:"message"`
+	Callback *struct {
+		ID      string `json:"id"`
+		Data    string `json:"data"`
+		Message *struct {
+			ID   int64 `json:"message_id"`
+			Chat struct {
+				ID int64 `json:"id"`
+			} `json:"chat"`
+		} `json:"message"`
+	} `json:"callback_query"`
+}
+
+// Updates long-polls for new updates after offset.
+func (b *Bot) Updates(ctx context.Context, offset int64, wait time.Duration) ([]Update, error) {
+	var ups []Update
+	err := b.post(ctx, "getUpdates", map[string]any{
+		"offset": offset, "timeout": int(wait.Seconds()), "allowed_updates": []string{"message", "callback_query"},
+	}, &ups)
+	return ups, err
+}

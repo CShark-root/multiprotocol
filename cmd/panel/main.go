@@ -208,11 +208,15 @@ func serve(args []string) int {
 	go service.WatchAmnezia(ctx, amneziaRO, events)
 	notifier := service.NewNotifier(st, events, *dataDir, cfg.PublicHost, log)
 	go notifier.Run(ctx)
+	usersSvc := service.NewUsers(st, changed)
+	go service.NewBot(service.BotDeps{
+		Notifier: notifier, Users: usersSvc, Agent: localAgent, Reboot: rebootFunc(*dev), SubBase: subBase, Log: log,
+	}).Run(ctx)
 
 	handler := api.New(api.Deps{
 		BasePath:   cfg.BasePath,
 		Auth:       authSvc,
-		Users:      service.NewUsers(st, changed),
+		Users:      usersSvc,
 		Inbounds:   inboundsSvc,
 		Domains:    domains,
 		Telegram:   notifier,

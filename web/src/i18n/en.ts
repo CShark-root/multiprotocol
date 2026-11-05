@@ -712,6 +712,8 @@ export const en: Messages = {
       amnezia_up: 'An Amnezia container is back',
       warp_restarted: 'WARP restarted after a failure',
     },
+    control: 'Manage through the bot',
+    controlHint: 'Send /start to the bot for a menu: server state, users (renew, reset traffic, switch off, subscription link), core restart, backup, reboot. It answers your chat only.',
     dailyBackup: 'Daily backup to Telegram',
     dailyBackupHint: 'The .mpbk file is encrypted with the backup password: Telegram chats are not end-to-end encrypted.',
     backupPassword: 'Backup password',

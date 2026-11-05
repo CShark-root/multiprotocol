@@ -14,6 +14,7 @@ type telegramDTO struct {
 	Events            []string  `json:"events"`
 	AllEvents         []string  `json:"allEvents"`
 	DailyBackup       bool      `json:"dailyBackup"`
+	Control           bool      `json:"control"`
 	HasBackupPassword bool      `json:"hasBackupPassword"`
 	LastBackup        time.Time `json:"lastBackup"`
 	LastError         string    `json:"lastError"`
@@ -25,7 +26,7 @@ func toTelegramDTO(s service.TelegramSettings) telegramDTO {
 	}
 	return telegramDTO{
 		HasToken: s.Token != "", ChatID: s.ChatID, ChatName: s.ChatName, Events: s.Events, AllEvents: service.NotifyEvents,
-		DailyBackup: s.DailyBackup, HasBackupPassword: s.BackupPassword != "", LastBackup: s.LastBackup, LastError: s.LastError,
+		DailyBackup: s.DailyBackup, Control: s.Control, HasBackupPassword: s.BackupPassword != "", LastBackup: s.LastBackup, LastError: s.LastError,
 	}
 }
 
@@ -40,13 +41,14 @@ func (s *server) saveTelegram(w http.ResponseWriter, r *http.Request) {
 		ChatName       string   `json:"chatName"`
 		Events         []string `json:"events"`
 		DailyBackup    bool     `json:"dailyBackup"`
+		Control        bool     `json:"control"`
 		BackupPassword string   `json:"backupPassword"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
 	}
 	st, err := s.Telegram.Save(r.Context(), adminFrom(r.Context()).ID, service.TelegramSettings{
-		Token: in.Token, ChatID: in.ChatID, ChatName: in.ChatName, Events: in.Events, DailyBackup: in.DailyBackup, BackupPassword: in.BackupPassword,
+		Token: in.Token, ChatID: in.ChatID, ChatName: in.ChatName, Events: in.Events, DailyBackup: in.DailyBackup, Control: in.Control, BackupPassword: in.BackupPassword,
 	})
 	if err != nil {
 		s.handleError(w, r, err)

@@ -844,11 +844,11 @@ function TelegramCard() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['telegram'], queryFn: api.telegram.get })
   const [token, setToken] = useState('')
-  const [form, setForm] = useState<{ chatId: number; chatName: string; events: string[]; dailyBackup: boolean; backupPassword: string } | null>(null)
+  const [form, setForm] = useState<{ chatId: number; chatName: string; events: string[]; dailyBackup: boolean; control: boolean; backupPassword: string } | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const d = q.data
   useEffect(() => {
-    if (d && !form) setForm({ chatId: d.chatId, chatName: d.chatName, events: d.events, dailyBackup: d.dailyBackup, backupPassword: '' })
+    if (d && !form) setForm({ chatId: d.chatId, chatName: d.chatName, events: d.events, dailyBackup: d.dailyBackup, control: d.control, backupPassword: '' })
   }, [d, form])
   const fail = (e: unknown) => setMsg({ ok: false, text: e instanceof ApiError ? e.message : t('common.error') })
   const save = useMutation({
@@ -915,6 +915,14 @@ function TelegramCard() {
             ))}
           </div>
         </div>
+
+        <label className="flex items-start gap-2.5 rounded-xl bg-muted/60 p-3.5 text-sm">
+          <input type="checkbox" className="mt-1" checked={form.control} onChange={(e) => setForm({ ...form, control: e.target.checked })} />
+          <span>
+            {t('telegram.control')}
+            <span className="block text-xs text-muted-foreground">{t('telegram.controlHint')}</span>
+          </span>
+        </label>
 
         <div className="rounded-xl bg-muted/60 p-3.5">
           <label className="flex items-start gap-2.5 text-sm">

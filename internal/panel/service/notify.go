@@ -26,6 +26,7 @@ type TelegramSettings struct {
 	ChatName       string    `json:"chatName"`
 	Events         []string  `json:"events"`
 	DailyBackup    bool      `json:"dailyBackup"`
+	Control        bool      `json:"control"`        // the bot answers with a management menu
 	BackupPassword string    `json:"backupPassword"` // never sent back
 	LastBackup     time.Time `json:"lastBackup"`
 	LastError      string    `json:"lastError"`

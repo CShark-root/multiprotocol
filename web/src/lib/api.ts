@@ -164,6 +164,7 @@ export type TelegramInfo = {
   events: string[]
   allEvents: string[]
   dailyBackup: boolean
+  control: boolean
   hasBackupPassword: boolean
   lastBackup: string
   lastError: string
@@ -418,7 +419,7 @@ export const api = {
   },
   telegram: {
     get: () => request<TelegramInfo>('GET', 'telegram'),
-    save: (s: { token: string; chatId: number; chatName: string; events: string[]; dailyBackup: boolean; backupPassword: string }) => request<TelegramInfo>('PUT', 'telegram', s),
+    save: (s: { token: string; chatId: number; chatName: string; events: string[]; dailyBackup: boolean; control: boolean; backupPassword: string }) => request<TelegramInfo>('PUT', 'telegram', s),
     findChat: (token: string) => request<{ id: number; name: string }>('POST', 'telegram/find-chat', { token }),
     test: () => request<void>('POST', 'telegram/test', {}),
     backup: () => request<void>('POST', 'telegram/backup', {}),
