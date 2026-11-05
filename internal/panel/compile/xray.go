@@ -47,6 +47,10 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 			ins = append(ins, xrayInbound(ib, users))
 		}
 	}
+	// Скрытые подключения для трафика с других наших серверов (каскад).
+	for _, e := range rt.Cascades {
+		ins = append(ins, cascadeInbound(e))
+	}
 	// The bridge runs whenever WARP is registered and on, even before any rule
 	// uses it: the WARP check goes through it.
 	bridge := rt.Warp != nil && rt.Bridge.Port > 0
@@ -412,4 +416,25 @@ func warpEndpoint(ep string) string {
 		return "162.159.192.1:2408"
 	}
 	return net.JoinHostPort(host, port)
+}
+
+// cascadeInbound — VLESS + Reality (TCP, Vision) с одним служебным
+// клиентом. Его трафик не считается ни одному пользователю: он уже учтён
+// на сервере, куда пользователь подключился.
+func cascadeInbound(e routing.CustomOutbound) map[string]any {
+	c := e.Cascade
+	return map[string]any{
+		"tag": "cascade_" + e.ID, "listen": "0.0.0.0", "port": c.Port, "protocol": "vless",
+		"settings": map[string]any{
+			"clients":    []any{map[string]any{"id": c.UUID, "flow": "xtls-rprx-vision", "email": "cascade-" + e.ID}},
+			"decryption": "none",
+		},
+		"streamSettings": map[string]any{
+			"network": "raw", "security": "reality",
+			"realitySettings": map[string]any{
+				"target": c.SNI + ":443", "serverNames": []string{c.SNI}, "privateKey": c.PrivateKey, "shortIds": []string{c.ShortID},
+			},
+		},
+		"sniffing": map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "routeOnly": true},
+	}
 }

@@ -182,6 +182,7 @@ func serve(args []string) int {
 		nodesSvc = service.NewNodes(st, events, *dataDir, log)
 		nodesSvc.SetChanged(syncer.Trigger)
 		syncer.SetNodes(nodesSvc)
+		syncer.SetMainHost(cfg.PublicHost)
 		go nodesSvc.RunWatch(ctx)
 		go syncer.Run(ctx)
 		go routingSvc.RunGeoUpdates(ctx)

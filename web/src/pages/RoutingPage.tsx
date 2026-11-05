@@ -884,6 +884,10 @@ function OutboundsCard({ s, edit }: CardProps) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
+  // Выход: по ссылке или через наш сервер ("main" или id узла).
+  const [server, setServer] = useState('')
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.nodes.list, staleTime: 30_000 })
+  const serverName = (id: string) => (id === 'main' ? t('servers.thisServer') : (nodes.data?.find((n) => String(n.id) === id)?.name ?? '#' + id))
   const [checks, setChecks] = useState<Record<string, { trace?: Trace; error?: string } | 'busy'>>({})
   const check = async (id: string) => {
     setChecks((c) => ({ ...c, [id]: 'busy' }))
@@ -921,7 +925,7 @@ function OutboundsCard({ s, edit }: CardProps) {
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{o.name}</div>
-                    <div className="truncate font-mono text-xs text-muted-foreground">{o.summary || t('routing.outsUnsaved')}</div>
+                    <div className="truncate font-mono text-xs text-muted-foreground">{o.server ? t('routing.outsViaServer', { name: serverName(o.server) }) : o.summary || t('routing.outsUnsaved')}</div>
                   </div>
                   {o.id && (
                     <Button variant="ghost" size="sm" disabled={st === 'busy'} onClick={() => check(o.id)}>
@@ -954,6 +958,22 @@ function OutboundsCard({ s, edit }: CardProps) {
           <Field label={t('routing.outsName')}>
             {(id) => <Input id={id} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={t('routing.outsNamePlaceholder')} />}
           </Field>
+          {(nodes.data?.length ?? 0) > 0 && (
+            <Field label={t('routing.outsKind')} hint={t('routing.outsKindHint')}>
+              {(id) => (
+                <Select id={id} value={server} onChange={(e) => setServer(e.target.value)}>
+                  <option value="">{t('routing.outsByLink')}</option>
+                  <option value="main">{t('routing.outsVia', { name: t('servers.thisServer') })}</option>
+                  {nodes.data?.map((n) => (
+                    <option key={n.id} value={String(n.id)}>
+                      {t('routing.outsVia', { name: n.name })}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          )}
+          {!server && (
           <Field label={t('routing.outsLink')} hint={t('routing.outsLinkHint')}>
             {(id) => (
               <textarea
@@ -967,17 +987,19 @@ function OutboundsCard({ s, edit }: CardProps) {
               />
             )}
           </Field>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setAdding(false)}>
               {t('common.cancel')}
             </Button>
             <Button
               size="sm"
-              disabled={!name.trim() || !link.trim()}
+              disabled={!name.trim() || (!server && !link.trim())}
               onClick={() => {
-                edit((d) => d.outbounds.push({ id: '', name: name.trim(), summary: '', link: link.trim() }))
+                edit((d) => d.outbounds.push({ id: '', name: name.trim(), summary: '', link: server ? '' : link.trim(), server: server || undefined }))
                 setName('')
                 setLink('')
+                setServer('')
                 setAdding(false)
               }}
             >

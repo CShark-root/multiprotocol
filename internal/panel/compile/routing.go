@@ -1,8 +1,11 @@
 package compile
 
 import (
+	"net"
 	"net/netip"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"panel/internal/panel/geo"
@@ -25,6 +28,10 @@ type Routing struct {
 	IPs    map[string][]netip.Prefix
 	// Custom are the admin's own exits with their loopback bridges.
 	Custom []Custom
+	// Exits — выходы через наши серверы; ForServer превращает их в Custom
+	// или, на самом сервере-выходе, в скрытые подключения Cascades.
+	Exits    []routing.CustomOutbound
+	Cascades []routing.CustomOutbound
 }
 
 // Custom is a parsed custom exit.
@@ -66,6 +73,12 @@ func NewRouting(s routing.Settings, geoDir string, has func(string) bool, sites 
 		rt.Bridge = s.Bridge
 	}
 	for _, o := range s.Outbounds {
+		if o.Server != "" {
+			if o.Cascade != nil {
+				rt.Exits = append(rt.Exits, o)
+			}
+			continue
+		}
 		if p, err := outbound.Parse(o.Link); err == nil {
 			rt.Custom = append(rt.Custom, Custom{Tag: routing.OutTag(o.ID), Out: p, Bridge: o.Bridge})
 		}
@@ -144,6 +157,61 @@ func (rt Routing) ForNode() Routing {
 	out.Rules = make([]routing.Final, len(rt.Rules))
 	for i, r := range rt.Rules {
 		if r.Outbound == routing.WARP {
+			r.Outbound = routing.Direct
+		}
+		out.Rules[i] = r
+	}
+	return out
+}
+
+// CascadeLink — ссылка vless:// на скрытое подключение сервера-выхода.
+func CascadeLink(c routing.Cascade, host string) string {
+	return "vless://" + c.UUID + "@" + net.JoinHostPort(host, strconv.Itoa(c.Port)) +
+		"?type=tcp&security=reality&flow=xtls-rprx-vision&fp=chrome&sni=" + url.QueryEscape(c.SNI) +
+		"&pbk=" + url.QueryEscape(c.PublicKey) + "&sid=" + c.ShortID
+}
+
+// ForServer — маршрутизация для одного сервера. self — "main" или id узла,
+// selfHost — его адрес. Выход на этот же сервер (свой или по совпадению
+// адреса в ссылке) становится «напрямую», иначе трафик ходил бы по кругу.
+// Выход через наш сервер становится обычным своим выходом до него, а на
+// самом сервере-выходе — скрытым подключением, которое этот трафик принимает.
+func (rt Routing) ForServer(self, selfHost string, hostOf func(server string) string) Routing {
+	out := rt
+	direct := map[string]bool{}
+	out.Custom = nil
+	for _, c := range rt.Custom {
+		if selfHost != "" && strings.EqualFold(c.Out.Host, selfHost) {
+			direct[c.Tag] = true
+			continue
+		}
+		out.Custom = append(out.Custom, c)
+	}
+	out.Cascades = nil
+	for _, e := range rt.Exits {
+		tag := routing.OutTag(e.ID)
+		if e.Server == self {
+			direct[tag] = true
+			out.Cascades = append(out.Cascades, e)
+			continue
+		}
+		host := hostOf(e.Server)
+		p, err := outbound.Parse(CascadeLink(*e.Cascade, host))
+		if host == "" || err != nil {
+			direct[tag] = true // адрес сервера неизвестен — лучше напрямую, чем в никуда
+			continue
+		}
+		out.Custom = append(out.Custom, Custom{Tag: tag, Out: p, Bridge: e.Bridge})
+	}
+	if len(direct) == 0 {
+		return out
+	}
+	if direct[outTag(out.Final)] {
+		out.Final = routing.Direct
+	}
+	out.Rules = make([]routing.Final, len(rt.Rules))
+	for i, r := range rt.Rules {
+		if direct[outTag(r.Outbound)] {
 			r.Outbound = routing.Direct
 		}
 		out.Rules[i] = r

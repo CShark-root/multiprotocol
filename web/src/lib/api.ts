@@ -80,7 +80,7 @@ export type OnlineEntry = { userId: number; ips: string[]; connections: number }
 export type DayTraffic = { day: string; bytes: number }
 
 export type Outbound = 'direct' | 'block' | 'warp' | 'ipv4' | `out:${string}`
-export type CustomOut = { id: string; name: string; summary: string; link?: string }
+export type CustomOut = { id: string; name: string; summary: string; link?: string; server?: string } // server: "main" или id узла
 export type CoreSupport = 'full' | 'partial' | 'none'
 export type RoutingRule = {
   id: string

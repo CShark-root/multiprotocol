@@ -462,6 +462,18 @@ func (r *Routing) Countries() (list []Country, ruBlocked bool) {
 func carryOutbounds(in *routing.Settings, cur routing.Settings) error {
 	for i := range in.Outbounds {
 		o := &in.Outbounds[i]
+		// Ключи каскада — только с сервера, не из запроса.
+		o.Cascade = nil
+		if old := findOutbound(cur, o.ID); old != nil && old.Server == o.Server {
+			o.Cascade = old.Cascade
+		}
+		if o.Server != "" && o.Cascade == nil {
+			c, err := newCascade()
+			if err != nil {
+				return err
+			}
+			o.Cascade = c
+		}
 		if old := findOutbound(cur, o.ID); old != nil {
 			if o.Link == "" {
 				o.Link = old.Link
@@ -669,4 +681,16 @@ func (r *Routing) rotateWarp(ctx context.Context) (string, error) {
 	}
 	r.changed()
 	return s.WARP.Account.Endpoint, nil
+}
+
+// newCascade — ключи скрытого подключения для выхода через наш сервер.
+func newCascade() (*routing.Cascade, error) {
+	priv, pub, err := NewRealityKeys()
+	if err != nil {
+		return nil, err
+	}
+	return &routing.Cascade{
+		Port: 20000 + int(randomUint16()%40000), UUID: NewUUID(),
+		PrivateKey: priv, PublicKey: pub, ShortID: randomHex(8), SNI: "www.microsoft.com",
+	}, nil
 }

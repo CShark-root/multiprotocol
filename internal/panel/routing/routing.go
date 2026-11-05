@@ -231,7 +231,26 @@ type CustomOutbound struct {
 	Name   string `json:"name"`
 	Link   string `json:"link"`
 	Bridge Bridge `json:"bridge"`
+	// Server — выход через наш сервер: "main" (главный) или id узла. Ссылку
+	// тогда собирает панель, Link пуст. Cascade — ключи скрытого служебного
+	// подключения, которое панель держит на том сервере.
+	Server  string   `json:"server,omitempty"`
+	Cascade *Cascade `json:"cascade,omitempty"`
 }
+
+// Cascade — скрытое подключение VLESS + Reality на сервере-выходе: через
+// него другие наши серверы отправляют трафик.
+type Cascade struct {
+	Port       int    `json:"port"`
+	UUID       string `json:"uuid"`
+	PrivateKey string `json:"privateKey"`
+	PublicKey  string `json:"publicKey"`
+	ShortID    string `json:"shortId"`
+	SNI        string `json:"sni"` // сайт, под который маскируется Reality
+}
+
+// MainServer — значение Server для главного сервера.
+const MainServer = "main"
 
 // OutPrefix marks a rule outbound that names a custom exit.
 const OutPrefix = "out:"
@@ -742,6 +761,7 @@ func (d DNSSettings) DNSGeoNames() []string {
 }
 
 var outIDRe = regexp.MustCompile(`^[a-z0-9]{1,12}$`)
+var serverIDRe = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)
 
 func normalizeOutbounds(s *Settings) error {
 	if s.Outbounds == nil {
@@ -762,6 +782,15 @@ func normalizeOutbounds(s *Settings) error {
 		if o.Name == "" || len(o.Name) > 40 {
 			return validate.Fail("outbounds.name", "1-40 characters")
 		}
+		if o.Server != "" {
+			// Выход через наш сервер: ссылку собирает панель.
+			if o.Server != MainServer && !serverIDRe.MatchString(o.Server) {
+				return validate.Fail("outbounds.server", "unknown server")
+			}
+			o.Link = ""
+			continue
+		}
+		o.Cascade = nil
 		if _, err := outbound.Parse(o.Link); err != nil {
 			return validate.Fail("outbounds.link", err.Error())
 		}

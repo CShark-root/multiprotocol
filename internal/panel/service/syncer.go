@@ -14,6 +14,7 @@ import (
 	"panel/internal/amnezia"
 	"panel/internal/nethelper"
 	"panel/internal/panel/compile"
+	"panel/internal/panel/routing"
 	"panel/internal/panel/store"
 )
 
@@ -45,6 +46,7 @@ type Syncer struct {
 	amnezia     AmneziaClients  // nil: без связки с Amnezia
 	amneziaSeen *amnezia.Status // что помощник показал в этом круге
 	nodes       *Nodes          // nil: только этот сервер
+	mainHost    string          // адрес главного сервера для каскадов
 }
 
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {
@@ -212,7 +214,9 @@ func (s *Syncer) apply(ctx context.Context) error {
 	}
 	all := inbounds
 	inbounds = onNode(all, 0)
-	s.applyNodes(ctx, all, active, rt)
+	hostOf := s.serverHosts(ctx)
+	s.applyNodes(ctx, all, active, rt, hostOf)
+	rt = rt.ForServer(routing.MainServer, s.mainHost, hostOf)
 	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr, rt)
 	if err != nil {
 		return err
@@ -283,7 +287,7 @@ func onNode(list []store.Inbound, node int64) []store.Inbound {
 
 // applyNodes собирает конфиги для каждого узла. Узел, который ещё ни разу
 // не приходил, ждёт: без адреса его API Xray конфиг не собрать.
-func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []store.User, rt compile.Routing) {
+func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []store.User, rt compile.Routing, hostOf func(string) string) {
 	if s.nodes == nil {
 		return
 	}
@@ -307,13 +311,29 @@ func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []s
 			continue
 		}
 		ibs := onNode(all, node.ID)
-		xr, err1 := compile.Xray(ibs, active, api, nrt)
-		hy, err2 := compile.Hysteria(ibs, active, nrt)
-		sb, err3 := compile.SingBox(ibs, active, nrt)
+		srt := nrt.ForServer(strconv.FormatInt(node.ID, 10), node.Host, hostOf)
+		xr, err1 := compile.Xray(ibs, active, api, srt)
+		hy, err2 := compile.Hysteria(ibs, active, srt)
+		sb, err3 := compile.SingBox(ibs, active, srt)
 		if err := errors.Join(err1, err2, err3); err != nil {
 			s.log.Warn("compile node config", "node", node.Name, "err", err)
 			continue
 		}
 		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb}, files)
 	}
+}
+
+// SetMainHost — адрес этого сервера, на который другие наши серверы
+// отправляют каскадный трафик. Вызывать до Run.
+func (s *Syncer) SetMainHost(h string) { s.mainHost = h }
+
+// serverHosts — адрес сервера по его имени в выходах ("main" или id узла).
+func (s *Syncer) serverHosts(ctx context.Context) func(string) string {
+	hosts := map[string]string{routing.MainServer: s.mainHost}
+	if nodes, err := s.store.ListNodes(ctx); err == nil {
+		for _, n := range nodes {
+			hosts[strconv.FormatInt(n.ID, 10)] = n.Host
+		}
+	}
+	return func(server string) string { return hosts[server] }
 }
