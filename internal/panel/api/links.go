@@ -71,6 +71,21 @@ type SubscriptionDeps struct {
 	Decoy      config.DecoyMode
 }
 
+// wantsMihomo — формат Mihomo (Clash) для ?format=clash и клиентов на нём:
+// FlClash, Clash Meta for Android, Clash Verge, ClashMi, mihomo.
+func wantsMihomo(r *http.Request) bool {
+	if f := r.URL.Query().Get("format"); f != "" {
+		return f == "clash" || f == "mihomo"
+	}
+	ua := strings.ToLower(r.UserAgent())
+	for _, s := range []string{"clash", "mihomo", "flclash", "stash"} {
+		if strings.Contains(ua, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // wantsSingBox picks the sing-box JSON format for ?format=singbox and for
 // the official sing-box apps (SFA/SFI/SFM/SFT user agents).
 func wantsSingBox(r *http.Request) bool {
@@ -120,6 +135,18 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 		d.Store.GetSetting(r.Context(), subscription.SettingsKey, &ss)
 		ss.Headers(h, u)
 		d.Store.LogSubFetch(r.Context(), u.ID, r.UserAgent(), clientIP(r), time.Now())
+		if wantsMihomo(r) {
+			rs := routing.Defaults()
+			d.Store.GetSetting(r.Context(), "routing", &rs)
+			body, err := subscription.MihomoConfig(inbounds, u, d.PublicHost, rs.Client)
+			if err != nil {
+				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.Set("Content-Type", "text/yaml; charset=utf-8")
+			w.Write(body)
+			return
+		}
 		if wantsSingBox(r) {
 			rs := routing.Defaults()
 			d.Store.GetSetting(r.Context(), "routing", &rs)
