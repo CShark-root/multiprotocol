@@ -16,9 +16,9 @@ import (
 // client switches to whatever protocol currently works.
 //
 // Skipped: XHTTP (sing-box does not implement it) and, for now, all Reality
-// inbounds. Tested on the VM, sing-box 1.14.4 as a client fails against the
-// Xray 26.10.31 Reality server with "reality verification failed" for every
-// uTLS fingerprint, while Xray clients connect fine. Reality users get the
+// inbounds. Причина известна: Xray 26.9.8+ требует в рукопожатии Reality ключ
+// X25519MLKEM768, а uTLS в sing-box 1.14 его не шлёт ни с одним отпечатком
+// (SagerNet/sing-box#4520). У Mihomo это включается опцией — см. mihomo.go. Reality users get the
 // share links / base64 subscription for Xray-based apps instead. Re-check
 // with newer versions and drop this when they interoperate again.
 const singboxRealityWorks = false

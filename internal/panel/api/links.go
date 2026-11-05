@@ -72,12 +72,21 @@ type SubscriptionDeps struct {
 	Decoy      config.DecoyMode
 }
 
-// wantsMihomo — формат Mihomo (Clash) по ?format=clash. По User-Agent пока не
-// выбирается: FlClash и другие получают обычную подписку, пока формат не
-// проверен на настоящем телефоне.
+// wantsMihomo — формат Mihomo (Clash) для ?format=clash и приложений на нём:
+// FlClash, Clash Meta for Android, Clash Verge, ClashMi. Обычная подписка им
+// не годится: из ссылок они собирают прокси без ML-KEM и без правил, и
+// трафик молча идёт напрямую.
 func wantsMihomo(r *http.Request) bool {
-	f := r.URL.Query().Get("format")
-	return f == "clash" || f == "mihomo"
+	if f := r.URL.Query().Get("format"); f != "" {
+		return f == "clash" || f == "mihomo"
+	}
+	ua := strings.ToLower(r.UserAgent())
+	for _, s := range []string{"clash", "mihomo"} {
+		if strings.Contains(ua, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // wantsSingBox picks the sing-box JSON format for ?format=singbox and for

@@ -107,8 +107,12 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 		r := s.Reality
 		p["tls"] = true
 		p["servername"] = r.ServerNames[0]
-		p["client-fingerprint"] = r.Fingerprint
-		p["reality-opts"] = map[string]any{"public-key": r.PublicKey, "short-id": r.ShortIDs[0]}
+		// Xray 26.9.8+ требует в рукопожатии Reality ключ X25519MLKEM768. Mihomo
+		// шлёт его только с этой опцией и только с отпечатком chrome (проверено
+		// на VM: firefox, safari, edge не проходят). Отпечаток — выбор клиента,
+		// сервер его не проверяет. См. MetaCubeX/mihomo#3042, SagerNet/sing-box#4520.
+		p["client-fingerprint"] = "chrome"
+		p["reality-opts"] = map[string]any{"public-key": r.PublicKey, "short-id": r.ShortIDs[0], "support-x25519mlkem768": true}
 	}
 	switch ib.Protocol {
 	case "vless", "trojan":
