@@ -227,6 +227,15 @@ func mihomoXHTTP(opts map[string]any, x *store.XHTTPSettings) {
 	}
 	set("sc-max-each-post-bytes", x.MaxEachPostBytes)
 	set("sc-min-posts-interval-ms", x.MinPostsIntervalMs)
+	// Без своих настроек — умолчания Xray-клиента (xmux): не больше 16–32 потоков
+	// на соединение и регулярно новое соединение. Mihomo по умолчанию гонит всё
+	// через одно HTTP/2-соединение, и если сеть его тихо оборвала, зависает всё
+	// (видно в журнале FlClash: первый запрос прошёл, дальше context canceled).
+	if x.Xmux == nil {
+		opts["reuse-settings"] = map[string]any{
+			"max-concurrency": "16-32", "h-max-request-times": "600-900", "h-max-reusable-secs": "1800-3000",
+		}
+	}
 	if m := x.Xmux; m != nil {
 		r := map[string]any{}
 		for k, v := range map[string]string{
