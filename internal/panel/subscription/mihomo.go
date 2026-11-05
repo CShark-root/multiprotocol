@@ -67,11 +67,8 @@ func MihomoConfig(inbounds []store.Inbound, u store.User, host, client string) (
 		},
 		"geo-auto-update":     true,
 		"geo-update-interval": 24,
-		"dns": map[string]any{
-			"enable": true, "ipv6": true, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
-			"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
-			"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
-		},
+		// DNS не задаём: приложение (FlClash и др.) пользуется своим. Наши 1.1.1.1
+		// и 8.8.8.8 у российских операторов режут — тогда не узнать адрес сервера.
 		"proxies":      proxies,
 		"proxy-groups": groups,
 		"rules":        mihomoRules(client),
