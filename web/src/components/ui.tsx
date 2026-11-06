@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -303,46 +304,68 @@ export function UsageRing({ part, size = 26 }: { part: number | null; size?: num
   return <Ring segments={[{ value: p, color }]} total={1} size={size} stroke={3} />
 }
 
-// RowMenu — меню «⋯» в строке таблицы. Закрывается по щелчку вне и по Esc.
+// RowMenu — меню «⋯» в строке таблицы. Рисуется поверх страницы (портал),
+// чтобы его не обрезал край таблицы, и открывается вверх, если внизу мало
+// места. Закрывается по щелчку вне, по Esc и при прокрутке.
 export function RowMenu({ label, items }: { label: string; items: { label: string; icon?: ReactNode; danger?: boolean; onClick: () => void }[] }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; right: number; up: boolean } | null>(null)
+  const btn = useRef<HTMLDivElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!open) return
-    const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)) setOpen(false)
+    if (!pos) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target instanceof Node && (menu.current?.contains(e.target) || btn.current?.contains(e.target)))) setPos(null)
     }
+    const drop = () => setPos(null)
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', close)
+    window.addEventListener('scroll', drop, true)
+    window.addEventListener('resize', drop)
     return () => {
       document.removeEventListener('mousedown', close)
       document.removeEventListener('keydown', close)
+      window.removeEventListener('scroll', drop, true)
+      window.removeEventListener('resize', drop)
     }
-  }, [open])
+  }, [pos])
+  const toggle = () => {
+    if (pos) return setPos(null)
+    const r = btn.current!.getBoundingClientRect()
+    const need = items.length * 40 + 16
+    const up = window.innerHeight - r.bottom < need && r.top > need
+    setPos({ top: up ? r.top - 4 : r.bottom + 4, right: window.innerWidth - r.right, up })
+  }
   return (
-    <div ref={ref} className="relative">
-      <Button variant="ghost" size="icon" aria-label={label} title={label} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+    <div ref={btn}>
+      <Button variant="ghost" size="icon" aria-label={label} title={label} aria-expanded={pos !== null} onClick={toggle}>
         <span aria-hidden className="text-lg leading-none">⋯</span>
       </Button>
-      {open && (
-        <div role="menu" className="absolute right-0 top-full z-20 mt-1 min-w-44 overflow-hidden rounded-xl border bg-card p-1 shadow-lg">
-          {items.map((it) => (
-            <button
-              key={it.label}
-              role="menuitem"
-              type="button"
-              onClick={() => {
-                setOpen(false)
-                it.onClick()
-              }}
-              className={cn('flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted', it.danger && 'text-destructive')}
-            >
-              {it.icon}
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {pos &&
+        createPortal(
+          <div
+            ref={menu}
+            role="menu"
+            style={{ position: 'fixed', top: pos.top, right: pos.right, transform: pos.up ? 'translateY(-100%)' : undefined }}
+            className="z-50 min-w-44 overflow-hidden rounded-xl border bg-card p-1 shadow-lg"
+          >
+            {items.map((it) => (
+              <button
+                key={it.label}
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setPos(null)
+                  it.onClick()
+                }}
+                className={cn('flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted', it.danger && 'text-destructive')}
+              >
+                {it.icon}
+                {it.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
