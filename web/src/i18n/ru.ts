@@ -891,8 +891,8 @@ export const ru = {
     toLatest: 'Снять закрепление и обновить',
     wait: 'Ядро ставится с проверкой конфига; панель перезапустится, клиенты переподключатся за пару секунд. Если новое ядро не запустится — вернётся прежнее.',
     done: 'Готово: стоит {{version}}.',
-    realityOld: 'Reality этой версии работает и в Hiddify / sing-box (без ключа ML-KEM).',
-    realityMlkem: 'С 26.9.8 Reality требует ключ ML-KEM: v2RayTun, v2rayNG и FlClash подключаются, Hiddify / sing-box по Reality — нет.',
+    realityOld: 'Не проверена с настройками панели: на тестовом сервере Xray 26.3.27 не пустил ни Mihomo, ни клиентов на новом Xray. Ставьте, только если точно знаете зачем.',
+    realityMlkem: 'Проверено: v2RayTun, v2rayNG и FlClash подключаются. Hiddify / sing-box по Reality — нет (им нужен ключ ML-KEM, которого в sing-box пока нет).',
     footer: 'Подробности установки — в журнале карточки «Обновления».',
   },
   subSettings: {

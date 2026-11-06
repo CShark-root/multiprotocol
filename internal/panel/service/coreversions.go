@@ -54,8 +54,9 @@ func scriptName(core string) string {
 	return core
 }
 
-// coreNote — подсказка к версии. Xray 26.9.8+ требует в Reality ключ ML-KEM:
-// sing-box (Hiddify) с такими серверами по Reality не подключается.
+// coreNote — подсказка к версии Xray. 26.9.8+ проверены (Xray- и Mihomo-клиенты
+// работают, sing-box по Reality нет); на 26.3.27 с настройками панели на VM
+// не подключился никто — более старые помечаем как непроверенные.
 func coreNote(core, v string) string {
 	if core != "xray" {
 		return ""

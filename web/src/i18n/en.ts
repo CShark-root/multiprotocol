@@ -893,8 +893,8 @@ export const en: Messages = {
     toLatest: 'Unpin and update',
     wait: 'The core is installed with a config check; the panel restarts and clients reconnect within seconds. If the new core does not start, the old one comes back.',
     done: 'Done: {{version}} is installed.',
-    realityOld: 'Reality of this version also works in Hiddify / sing-box (no ML-KEM key needed).',
-    realityMlkem: 'Since 26.9.8 Reality needs an ML-KEM key: v2RayTun, v2rayNG and FlClash connect, Hiddify / sing-box over Reality do not.',
+    realityOld: 'Not tested with the panel settings: on the test server Xray 26.3.27 let in neither Mihomo nor new Xray clients. Install only if you know why.',
+    realityMlkem: 'Tested: v2RayTun, v2rayNG and FlClash connect. Hiddify / sing-box over Reality do not (they need an ML-KEM key sing-box lacks).',
     footer: 'Installation details are in the log of the Updates card.',
   },
   subSettings: {
