@@ -161,7 +161,7 @@ func AnyTLSLink(ib store.Inbound, u store.User, host string) string {
 func Link(ib store.Inbound, u store.User, host string) string {
 	s := ib.Settings
 	switch {
-	case ib.Protocol == "vless" && s.Reality != nil:
+	case (ib.Protocol == "vless" || ib.Protocol == "vless-sb") && s.Reality != nil:
 		return VLESSLink(ib, u, host)
 	case ib.Protocol == "trojan" && s.Reality != nil:
 		return TrojanLink(ib, u, host)

@@ -33,6 +33,7 @@ import (
 	"panel/internal/agent"
 	"panel/internal/agent/hysteria"
 	"panel/internal/agent/singbox"
+	"panel/internal/agent/sniproxy"
 	"panel/internal/agent/xray"
 	"panel/internal/amnezia"
 	"panel/internal/nethelper"
@@ -167,7 +168,7 @@ func serve(args []string) int {
 		xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), geoDir, *xrayAPI, log)
 		hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
 		sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
-		localAgent = agent.New(xr, hy, sb)
+		localAgent = agent.New(xr, hy, sb, sniproxy.New(log))
 		defer localAgent.Stop()
 		syncer = service.NewSyncer(st, localAgent, events, *xrayAPI, log)
 		changed = syncer.Trigger
@@ -712,7 +713,7 @@ func agentCmd(args []string) int {
 	xr := xray.New(*xrayBin, filepath.Join(*dataDir, "xray"), filepath.Join(*dataDir, "geo"), cfg.XrayAPI, log)
 	hy := hysteria.New(*hysteriaBin, filepath.Join(*dataDir, "hysteria"), log)
 	sb := singbox.New(*singboxBin, filepath.Join(*dataDir, "sing-box"), log)
-	cores := agent.New(xr, hy, sb)
+	cores := agent.New(xr, hy, sb, sniproxy.New(log))
 	defer cores.Stop()
 	a, err := nodeagent.New(*dataDir, cfg, cores, log)
 	if err != nil {

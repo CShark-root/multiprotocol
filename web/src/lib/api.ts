@@ -176,7 +176,7 @@ export type TelegramInfo = {
 
 export type CoreHealth = { name: string; installed: boolean; running: boolean; version: string; message?: string }
 
-export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
+export type Protocol = 'vless' | 'vless-sb' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2' | 'tuic' | 'anytls' | 'shadowtls'
 export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'ws' | 'quic'
 
 /** Client app families, by the core inside the app (see service.ClientApps). */
@@ -188,6 +188,8 @@ export const protocolSpecs: Record<
   { transports: Transport[]; core: 'xray' | 'hysteria' | 'singbox'; network: string; apps: AppFamily[] }
 > = {
   vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo'] },
+  // VLESS + Reality на ядре sing-box: работает во всех трёх семействах приложений.
+  'vless-sb': { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['xray', 'mihomo', 'singbox'] },
   trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo'] },
   shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp', apps: ['xray', 'mihomo', 'singbox'] },
   vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo', 'singbox'] },

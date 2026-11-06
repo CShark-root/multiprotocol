@@ -217,6 +217,8 @@ func (s *Syncer) apply(ctx context.Context) error {
 	hostOf := s.serverHosts(ctx)
 	s.applyNodes(ctx, all, active, rt, hostOf)
 	rt = rt.ForServer(routing.MainServer, s.mainHost, hostOf)
+	// Один 443 на Reality Xray и sing-box — через распределитель по SNI.
+	inbounds, sniCfg := compile.SharePorts(inbounds)
 	xrayCfg, err := compile.Xray(inbounds, active, s.apiAddr, rt)
 	if err != nil {
 		return err
@@ -230,7 +232,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 		return err
 	}
 	err = s.agent.Apply(ctx, agent.NodeState{Configs: map[string][]byte{
-		"xray": xrayCfg, "hysteria": hyCfg, "singbox": sbCfg,
+		"xray": xrayCfg, "hysteria": hyCfg, "singbox": sbCfg, "sniproxy": sniCfg,
 	}})
 	s.applyHops(ctx, inbounds)
 	return err
@@ -310,7 +312,7 @@ func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []s
 		if api == "" {
 			continue
 		}
-		ibs := onNode(all, node.ID)
+		ibs, sniCfg := compile.SharePorts(onNode(all, node.ID))
 		srt := nrt.ForServer(strconv.FormatInt(node.ID, 10), node.Host, hostOf)
 		xr, err1 := compile.Xray(ibs, active, api, srt)
 		hy, err2 := compile.Hysteria(ibs, active, srt)
@@ -319,7 +321,7 @@ func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []s
 			s.log.Warn("compile node config", "node", node.Name, "err", err)
 			continue
 		}
-		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb}, files)
+		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb, "sniproxy": sniCfg}, files)
 	}
 }
 

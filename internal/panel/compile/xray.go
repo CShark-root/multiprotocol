@@ -287,9 +287,13 @@ func xrayInbound(ib store.Inbound, users []store.User) map[string]any {
 			"metadataOnly": s.MetadataOnly, "routeOnly": s.RouteOnly,
 		}
 	}
+	listen := "0.0.0.0"
+	if ib.LocalOnly {
+		listen = "127.0.0.1"
+	}
 	in := map[string]any{
 		"tag":      "in-" + strconv.FormatInt(ib.ID, 10),
-		"listen":   "0.0.0.0",
+		"listen":   listen,
 		"port":     ib.Port,
 		"sniffing": sniffing,
 	}

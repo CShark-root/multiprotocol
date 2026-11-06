@@ -204,6 +204,7 @@ export const ru = {
     transport: 'Транспорт',
     protocols: {
       vless: { title: 'VLESS + Reality', text: 'Маскируется под настоящий сайт, домен не нужен. С него лучше начать.' },
+      'vless-sb': { title: 'VLESS + Reality (sing-box)', text: 'Тот же VLESS на ядре sing-box — работает во всех приложениях, включая Hiddify. Ставьте на 443 рядом с основным VLESS, но с другим сайтом маскировки: панель сама разведёт их по SNI.' },
       trojan: { title: 'Trojan + Reality', text: 'Та же маскировка Reality, другой протокол внутри.' },
       shadowsocks: { title: 'Shadowsocks-2022', text: 'Простой и лёгкий, трафик похож на случайные данные.' },
       vmess: { title: 'VMess', text: 'Устаревший и заметный. Только для старых клиентов.' },

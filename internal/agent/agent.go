@@ -26,7 +26,20 @@ func New(adapters ...Adapter) *Agent {
 // failing does not stop the others from being updated.
 func (a *Agent) Apply(ctx context.Context, st NodeState) error {
 	var errs []error
-	for _, ad := range a.adapters {
+	// Распределитель по SNI держит общий порт (443): выключаясь, он должен
+	// отдать порт раньше, чем Xray его займёт, а включаясь — занять после.
+	order := a.adapters
+	if st.Configs["sniproxy"] == nil {
+		order = make([]Adapter, 0, len(a.adapters))
+		for _, ad := range a.adapters {
+			if ad.Name() == "sniproxy" {
+				order = append([]Adapter{ad}, order...)
+			} else {
+				order = append(order, ad)
+			}
+		}
+	}
+	for _, ad := range order {
 		if err := ad.Apply(ctx, st.Configs[ad.Name()]); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", ad.Name(), err))
 		}

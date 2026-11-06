@@ -115,14 +115,15 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 		p["reality-opts"] = map[string]any{"public-key": r.PublicKey, "short-id": r.ShortIDs[0], "support-x25519mlkem768": true}
 	}
 	switch ib.Protocol {
-	case "vless", "trojan":
+	case "vless", "trojan", "vless-sb":
 		// Поля — как у самого Mihomo, когда он разбирает нашу ссылку vless://
 		// (с ней FlClash работает на VPS).
 		if s.Reality == nil {
 			return nil
 		}
-		p["type"] = ib.Protocol
-		if ib.Protocol == "vless" {
+		vless := ib.Protocol != "trojan" // vless и vless-sb
+		p["type"] = map[bool]string{true: "vless", false: "trojan"}[vless]
+		if vless {
 			p["uuid"] = u.UUID
 			p["encryption"], p["xudp"] = "none", true
 		} else {
@@ -132,7 +133,7 @@ func mihomoProxy(ib store.Inbound, u store.User, host string) map[string]any {
 		switch ib.Transport {
 		case "tcp":
 			p["network"] = "tcp"
-			if ib.Protocol == "vless" {
+			if vless {
 				p["flow"] = "xtls-rprx-vision"
 			}
 		case "grpc":

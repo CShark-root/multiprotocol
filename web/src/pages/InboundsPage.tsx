@@ -14,7 +14,7 @@ const cores = {
   singbox: { title: 'sing-box', script: 'singbox' },
 } as const
 
-const realityProtocols: Protocol[] = ['vless', 'trojan']
+const realityProtocols: Protocol[] = ['vless', 'vless-sb', 'trojan']
 const certProtocols: Protocol[] = ['tuic', 'anytls']
 
 function CoreBanners({ inbounds }: { inbounds: Inbound[] }) {

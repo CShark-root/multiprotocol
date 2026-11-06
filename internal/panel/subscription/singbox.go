@@ -103,12 +103,14 @@ func singboxOutbounds(ib store.Inbound, u store.User, host string) []map[string]
 	}
 
 	switch ib.Protocol {
-	case "vless", "trojan":
-		if !singboxRealityWorks || ib.Transport == "xhttp" || s.Reality == nil {
+	case "vless", "trojan", "vless-sb":
+		// Reality нового Xray sing-box не проходит, а Reality ядра sing-box (vless-sb) — да.
+		if ib.Protocol != "vless-sb" && !singboxRealityWorks || ib.Transport == "xhttp" || s.Reality == nil {
 			return nil
 		}
-		o["type"] = ib.Protocol
-		if ib.Protocol == "vless" {
+		vless := ib.Protocol != "trojan"
+		o["type"] = map[bool]string{true: "vless", false: "trojan"}[vless]
+		if vless {
 			o["uuid"] = u.UUID
 			if ib.Transport == "tcp" {
 				o["flow"] = "xtls-rprx-vision"

@@ -33,8 +33,11 @@ type ProtocolSpec struct {
 }
 
 var protocols = map[string]ProtocolSpec{
-	"vless":       {Core: "xray", Networks: []string{"tcp"}, Transports: []string{"xhttp", "tcp", "grpc"}, Security: "reality"},
-	"trojan":      {Core: "xray", Networks: []string{"tcp"}, Transports: []string{"tcp", "xhttp", "grpc"}, Security: "reality"},
+	"vless":  {Core: "xray", Networks: []string{"tcp"}, Transports: []string{"xhttp", "tcp", "grpc"}, Security: "reality"},
+	"trojan": {Core: "xray", Networks: []string{"tcp"}, Transports: []string{"tcp", "xhttp", "grpc"}, Security: "reality"},
+	// VLESS + Reality на ядре sing-box: его Reality пускает и клиентов sing-box
+	// (Hiddify), которых Xray 26.9.8+ не пускает без ключа ML-KEM.
+	"vless-sb":    {Core: "singbox", Networks: []string{"tcp"}, Transports: []string{"tcp"}, Security: "reality"},
 	"vmess":       {Core: "xray", Networks: []string{"tcp"}, Transports: []string{"ws", "tcp"}, Security: "none"},
 	"shadowsocks": {Core: "xray", Networks: []string{"tcp", "udp"}, Transports: []string{"tcp"}, Security: "none"},
 	"hysteria2":   {Core: "hysteria", Networks: []string{"udp"}, Transports: []string{"quic"}, Security: "tls"},
@@ -44,7 +47,7 @@ var protocols = map[string]ProtocolSpec{
 }
 
 // ProtocolOrder is the order the UI offers protocols in.
-var ProtocolOrder = []string{"vless", "trojan", "shadowsocks", "vmess", "hysteria2", "tuic", "anytls", "shadowtls"}
+var ProtocolOrder = []string{"vless", "vless-sb", "trojan", "shadowsocks", "vmess", "hysteria2", "tuic", "anytls", "shadowtls"}
 
 func Spec(protocol string) (ProtocolSpec, bool) {
 	p, ok := protocols[protocol]
@@ -72,7 +75,7 @@ func ClientApps(protocol string) []string {
 	// Reality нового Xray (26.9.8+) клиенты sing-box пока не проходят.
 	case "vless", "trojan":
 		return []string{AppsXray, AppsMihomo}
-	case "shadowsocks", "vmess", "hysteria2":
+	case "shadowsocks", "vmess", "hysteria2", "vless-sb":
 		return []string{AppsXray, AppsMihomo, AppsSingBox}
 	case "tuic", "anytls", "shadowtls":
 		return []string{AppsMihomo, AppsSingBox}
@@ -263,7 +266,7 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 	}
 	f.Security = spec.Security
 	for _, network := range spec.Networks {
-		if err := s.checkPort(ctx, f.Port, network, f.NodeID, cur); err != nil {
+		if err := s.checkPort(ctx, f.Port, network, f.Protocol, f.NodeID, cur); err != nil {
 			return f, err
 		}
 	}
@@ -272,6 +275,9 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 	}
 
 	if err := normalizeProtocol(&f, in); err != nil {
+		return f, err
+	}
+	if err := s.checkSharedSNI(ctx, f, cur); err != nil {
 		return f, err
 	}
 	if spec.Core == "xray" {
@@ -284,7 +290,7 @@ func (s *Inbounds) normalize(ctx context.Context, in InboundInput, cur *store.In
 
 func normalizeProtocol(f *store.InboundFields, in InboundInput) error {
 	switch f.Protocol {
-	case "vless", "trojan":
+	case "vless", "trojan", "vless-sb":
 		return normalizeReality(f, in)
 	case "vmess":
 		if f.Transport == "ws" {
@@ -492,7 +498,14 @@ func fillSecrets(f *store.InboundFields, in InboundInput, cur *store.Inbound, ce
 	return nil
 }
 
-func (s *Inbounds) checkPort(ctx context.Context, port int, network string, node int64, cur *store.Inbound) error {
+// sharesPort — можно ли двум подключениям стоять на одном порту: Reality
+// Xray и vless-sb делят его через распределитель по SNI.
+func sharesPort(a, b string) bool {
+	xr := func(p string) bool { return p == "vless" || p == "trojan" }
+	return a == "vless-sb" && xr(b) || b == "vless-sb" && xr(a)
+}
+
+func (s *Inbounds) checkPort(ctx context.Context, port int, network, proto string, node int64, cur *store.Inbound) error {
 	if port < 1 || port > 65535 {
 		return validate.Fail("port", "1-65535")
 	}
@@ -503,14 +516,19 @@ func (s *Inbounds) checkPort(ctx context.Context, port int, network string, node
 	if err != nil {
 		return err
 	}
+	shared := false
 	for _, other := range all {
 		if other.NodeID == node && other.Port == port && slices.Contains(Networks(other.Protocol), network) && (cur == nil || other.ID != cur.ID) {
+			if sharesPort(proto, other.Protocol) {
+				shared = true // порт уже держит наше же ядро
+				continue
+			}
 			return validate.Fail("port", fmt.Sprintf("already used by inbound %q", other.Remark))
 		}
 	}
 	// A port this inbound already holds is busy because its core listens on it.
 	// Порты другого сервера отсюда не проверить — их проверит его ядро.
-	if node == 0 && (cur == nil || cur.Port != port || cur.NodeID != 0) {
+	if node == 0 && !shared && (cur == nil || cur.Port != port || cur.NodeID != 0) {
 		if err := s.portFree(network, port); err != nil {
 			return validate.Fail("port", "the port is busy or unavailable on this server")
 		}
@@ -529,7 +547,7 @@ func (s *Inbounds) SuggestPort(ctx context.Context, networks ...string) int {
 next:
 	for _, p := range candidates {
 		for _, n := range networks {
-			if s.checkPort(ctx, p, n, 0, nil) != nil {
+			if s.checkPort(ctx, p, n, "", 0, nil) != nil {
 				continue next
 			}
 		}
@@ -547,6 +565,7 @@ var testKit = []struct{ Protocol, Transport, Remark string }{
 	{"vless", "xhttp", "VLESS XHTTP"},
 	{"vless", "tcp", "VLESS Vision"},
 	{"vless", "grpc", "VLESS gRPC"},
+	{"vless-sb", "tcp", "VLESS (sing-box)"},
 	{"trojan", "tcp", "Trojan"},
 	{"trojan", "xhttp", "Trojan XHTTP"},
 	{"shadowsocks", "tcp", "Shadowsocks-2022"},
@@ -817,4 +836,26 @@ func normalizeHop(v string, port int) (string, error) {
 		return "", validate.Fail("hopPorts", "the range must not include the inbound's own port")
 	}
 	return strconv.Itoa(a) + "-" + strconv.Itoa(b), nil
+}
+
+// checkSharedSNI — у подключений на общем порту должен быть разный сайт
+// маскировки (SNI): по нему распределитель решает, какому ядру отдать клиента.
+func (s *Inbounds) checkSharedSNI(ctx context.Context, f store.InboundFields, cur *store.Inbound) error {
+	r := f.Settings.Reality
+	if r == nil || len(r.ServerNames) == 0 {
+		return nil
+	}
+	all, err := s.store.ListInbounds(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range all {
+		if o.NodeID != f.NodeID || o.Port != f.Port || (cur != nil && o.ID == cur.ID) || !sharesPort(f.Protocol, o.Protocol) {
+			continue
+		}
+		if or := o.Settings.Reality; or != nil && slices.ContainsFunc(or.ServerNames, func(n string) bool { return strings.EqualFold(n, r.ServerNames[0]) }) {
+			return validate.Fail("target", fmt.Sprintf("inbound %q on the same port already uses %s; pick another site", o.Remark, r.ServerNames[0]))
+		}
+	}
+	return nil
 }

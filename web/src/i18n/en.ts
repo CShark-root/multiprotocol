@@ -206,6 +206,7 @@ export const en: Messages = {
     transport: 'Transport',
     protocols: {
       vless: { title: 'VLESS + Reality', text: 'The main Xray protocol. Impersonates a real site, needs no domain. A good place to start.' },
+      'vless-sb': { title: 'VLESS + Reality (sing-box)', text: 'The same VLESS on the sing-box core: works in every app, Hiddify included. Put it on 443 next to the main VLESS with another camouflage site: the panel splits them by SNI.' },
       trojan: { title: 'Trojan + Reality', text: 'A different protocol inside the same Reality camouflage — handy to compare with VLESS.' },
       shadowsocks: { title: 'Shadowsocks-2022', text: 'Simple and light: traffic looks like random data. Works over TCP and UDP.' },
       vmess: { title: 'VMess', text: 'Legacy, no TLS, easy to detect. Only for comparison and old clients.' },

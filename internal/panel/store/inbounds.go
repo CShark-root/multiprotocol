@@ -18,6 +18,9 @@ type Inbound struct {
 	Enabled   bool
 	TestKit   bool  // created by the "test kit" button, removed with it
 	NodeID    int64 // сервер: 0 — этот, иначе узел из nodes
+	// LocalOnly — слушать только 127.0.0.1 (порт делится через распределитель
+	// по SNI). Не хранится: выставляется при сборке конфига.
+	LocalOnly bool `json:"-"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

@@ -12,7 +12,7 @@ import (
 	"panel/internal/panel/store"
 )
 
-var singboxProtocols = map[string]bool{"tuic": true, "anytls": true, "shadowtls": true}
+var singboxProtocols = map[string]bool{"tuic": true, "anytls": true, "shadowtls": true, "vless-sb": true}
 
 // sing-box's Clash API does not report which user opened a connection,
 // but it does report the outbound chain, so every user gets their own
@@ -265,8 +265,12 @@ func singboxMatch(r routing.Final, rt Routing) (map[string]any, bool) {
 
 func singboxInbounds(ib store.Inbound, users []store.User) []any {
 	tag := "in-" + strconv.FormatInt(ib.ID, 10)
+	listen := "::"
+	if ib.LocalOnly {
+		listen = "127.0.0.1"
+	}
 	base := func(typ string) map[string]any {
-		return map[string]any{"type": typ, "tag": tag, "listen": "::", "listen_port": ib.Port}
+		return map[string]any{"type": typ, "tag": tag, "listen": listen, "listen_port": ib.Port}
 	}
 	tls := func(alpn []string) map[string]any {
 		t := ib.Settings.TLS
@@ -281,6 +285,27 @@ func singboxInbounds(ib store.Inbound, users []store.User) []any {
 	}
 
 	switch ib.Protocol {
+	case "vless-sb":
+		// VLESS + Reality (TCP, Vision) на ядре sing-box. Проверено на VM:
+		// пускает клиентов sing-box, Xray и Mihomo (с ML-KEM и без).
+		r := ib.Settings.Reality
+		host, portStr, _ := net.SplitHostPort(r.Target)
+		port, _ := strconv.Atoi(portStr)
+		in := base("vless")
+		list := []any{}
+		for _, u := range users {
+			list = append(list, map[string]any{"name": Email(u.ID), "uuid": u.UUID, "flow": "xtls-rprx-vision"})
+		}
+		in["users"] = list
+		in["tls"] = map[string]any{
+			"enabled": true, "server_name": r.ServerNames[0],
+			"reality": map[string]any{
+				"enabled":     true,
+				"handshake":   map[string]any{"server": host, "server_port": port},
+				"private_key": r.PrivateKey, "short_id": r.ShortIDs,
+			},
+		}
+		return []any{in}
 	case "tuic":
 		in := base("tuic")
 		list := []any{}
