@@ -60,6 +60,7 @@ func Networks(protocol string) []string { return protocols[protocol].Networks }
 const (
 	AppsXray    = "xray"
 	AppsSingBox = "singbox"
+	AppsMihomo  = "mihomo"
 )
 
 // ClientApps says which app families can connect to an inbound. VLESS and
@@ -68,12 +69,13 @@ const (
 // AnyTLS and ShadowTLS are sing-box protocols.
 func ClientApps(protocol string) []string {
 	switch protocol {
+	// Reality нового Xray (26.9.8+) клиенты sing-box пока не проходят.
 	case "vless", "trojan":
-		return []string{AppsXray}
+		return []string{AppsXray, AppsMihomo}
 	case "shadowsocks", "vmess", "hysteria2":
-		return []string{AppsXray, AppsSingBox}
+		return []string{AppsXray, AppsMihomo, AppsSingBox}
 	case "tuic", "anytls", "shadowtls":
-		return []string{AppsSingBox}
+		return []string{AppsMihomo, AppsSingBox}
 	}
 	return nil
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
-import { ApiError, api, basePath, extras, type PanelSettings, type SubSettings } from '@/lib/api'
+import { Archive, Cpu, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
+import { ApiError, api, basePath, coreVersions, extras, type PanelSettings, type SubSettings } from '@/lib/api'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab, Section } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
 
@@ -36,6 +36,7 @@ export function SettingsPage() {
             <>
               <UpdateCard />
               <CoresAutoCard />
+              <CoreVersionsCard />
               <BackupCard />
               <TelegramCard />
             </>
@@ -1132,6 +1133,92 @@ function SubscriptionCard() {
             </div>
           )}
         </form>
+      )}
+    </Section>
+  )
+}
+
+const coreTitles: Record<string, string> = { xray: 'Xray', hysteria: 'Hysteria2', singbox: 'sing-box' }
+
+// CoreVersionsCard — выбор версии каждого ядра, как в 3x-ui. Не последняя
+// версия закрепляется: ночное автообновление её не трогает.
+function CoreVersionsCard() {
+  const { t, i18n } = useTranslation()
+  const [waiting, setWaiting] = useState<{ core: string; version: string } | null>(null)
+  const q = useQuery({ queryKey: ['core-versions'], queryFn: coreVersions.list, refetchInterval: waiting ? 5_000 : false, retry: true })
+  const [picked, setPicked] = useState<Record<string, string>>({})
+  const install = useMutation({
+    mutationFn: (v: { core: string; version: string }) => coreVersions.install(v.core, v.version),
+    onSuccess: (_, v) => setWaiting(v),
+  })
+  const cores = q.data?.cores ?? []
+  // Ждём, пока ядро станет нужной версии (панель за это время перезапустится).
+  const done = waiting && cores.some((c) => c.core === waiting.core && (waiting.version === 'latest' ? c.current === c.latest : c.current === waiting.version))
+  useEffect(() => {
+    if (!done) return
+    const id = setTimeout(() => setWaiting(null), 4000)
+    return () => clearTimeout(id)
+  }, [done])
+  const err = install.error instanceof ApiError ? install.error.message : install.error ? t('common.error') : ''
+  const date = (s: string) => new Date(s).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' })
+
+  return (
+    <Section icon={<Cpu className="h-4 w-4" />} title={t('coreVersions.title')} hint={t('coreVersions.hint')}>
+      {!q.data ? (
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+      ) : !q.data.supported ? (
+        <p className="text-sm text-muted-foreground">{t('update.autoUnsupported')}</p>
+      ) : (
+        <div className="space-y-3">
+          {cores.map((c) => {
+            const value = picked[c.core] ?? c.pinned ?? c.current
+            const choice = c.versions.find((v) => v.version === value)
+            const busy = waiting?.core === c.core && !done
+            return (
+              <div key={c.core} className="rounded-xl bg-muted/60 p-3.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{coreTitles[c.core] ?? c.core}</span>
+                  <span className="font-mono text-sm">{c.current}</span>
+                  {c.current === c.latest && <Badge tone="success">{t('coreVersions.latest')}</Badge>}
+                  {c.pinned && <Badge tone="warning">{t('coreVersions.pinned')}</Badge>}
+                </div>
+                {c.error && <p className="mt-1 text-xs text-destructive">{c.error}</p>}
+                {c.versions.length > 0 && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <Select value={value} disabled={busy} onChange={(e) => setPicked({ ...picked, [c.core]: e.target.value })} className="w-auto min-w-56">
+                      {!c.versions.some((v) => v.version === c.current) && <option value={c.current}>{c.current}</option>}
+                      {c.versions.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          {v.version} · {date(v.published)}
+                          {v.recommended ? ` · ${t('coreVersions.recommended')}` : ''}
+                          {v.version === c.current ? ` · ${t('coreVersions.installed')}` : ''}
+                        </option>
+                      ))}
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy || install.isPending || value === c.current}
+                      onClick={() => install.mutate({ core: c.core, version: value })}
+                    >
+                      {busy ? t('coreVersions.installing') : t('coreVersions.install')}
+                    </Button>
+                    {c.pinned && (
+                      <Button size="sm" variant="ghost" disabled={busy || install.isPending} onClick={() => install.mutate({ core: c.core, version: 'latest' })}>
+                        {t('coreVersions.toLatest')}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {choice?.note && <p className="mt-2 text-xs text-muted-foreground">{t(`coreVersions.${choice.note}`)}</p>}
+                {busy && <p className="mt-2 text-xs text-muted-foreground">{t('coreVersions.wait')}</p>}
+                {done && waiting?.core === c.core && <p className="mt-2 text-xs text-success">{t('coreVersions.done', { version: c.current })}</p>}
+              </div>
+            )
+          })}
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          <p className="text-xs text-muted-foreground">{t('coreVersions.footer')}</p>
+        </div>
       )}
     </Section>
   )

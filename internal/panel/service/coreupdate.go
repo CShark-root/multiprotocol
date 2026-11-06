@@ -37,6 +37,9 @@ type CoreAutoSettings struct {
 	Hour      int       `json:"hour"` // час по времени сервера, 0–23
 	LastCheck time.Time `json:"lastCheck"`
 	LastError string    `json:"lastError,omitempty"`
+	// Pins — ядра, закреплённые на выбранной версии (имя у агента → "26.7.28").
+	// Ночное автообновление их не трогает.
+	Pins map[string]string `json:"pins,omitempty"`
 }
 
 // coreRepos: имя ядра у агента → репозиторий и префикс тега.
@@ -64,7 +67,9 @@ func NewCoreUpdater(st *store.Store, events *Events, health func(context.Context
 
 func (c *CoreUpdater) Get(ctx context.Context) CoreAutoSettings {
 	s := CoreAutoSettings{Enabled: true, Hour: 4}
-	c.store.GetSetting(ctx, coreAutoKey, &s)
+	if c.store != nil { // в тестах хранилища нет
+		c.store.GetSetting(ctx, coreAutoKey, &s)
+	}
 	return s
 }
 
@@ -110,7 +115,11 @@ func (c *CoreUpdater) Run(ctx context.Context) {
 		c.store.SetSetting(ctx, coreAutoKey, s)
 		if len(newer) > 0 {
 			c.log.Info("core updates found, requesting install", "cores", newer)
-			if err := c.request(); err != nil {
+			var targets []string
+			for _, n := range newer {
+				targets = append(targets, scriptName(n)+"@latest")
+			}
+			if err := c.request(targets); err != nil {
 				c.log.Warn("request core update", "err", err)
 			}
 		}
@@ -121,9 +130,13 @@ func (c *CoreUpdater) Run(ctx context.Context) {
 func (c *CoreUpdater) Check(ctx context.Context) ([]string, error) {
 	var newer []string
 	var errs []error
+	pins := c.Get(ctx).Pins
 	for _, core := range c.health(ctx).Cores {
 		r, ok := coreRepos[core.Name]
 		if !ok || !core.Installed || core.Version == "" {
+			continue
+		}
+		if _, pinned := pins[core.Name]; pinned {
 			continue
 		}
 		tag, err := c.latest(ctx, r.repo)
@@ -141,12 +154,17 @@ func (c *CoreUpdater) Check(ctx context.Context) ([]string, error) {
 	return newer, errors.Join(errs...)
 }
 
-func (c *CoreUpdater) request() error {
+// request просит root-скрипт поставить ядра targets («xray@latest», «sing-box@1.14.4»).
+func (c *CoreUpdater) request(targets []string) error {
 	path := filepath.Join(c.dataDir, "update-request")
 	if _, err := os.Stat(path); err == nil {
 		return nil // уже ждёт своей очереди
 	}
-	if err := os.WriteFile(path+".new", []byte("requested-by=auto\ncores-only=1\n"), 0o600); err != nil {
+	body := "requested-by=panel\ncores-only=1\n"
+	for _, t := range targets {
+		body += "core=" + t + "\n"
+	}
+	if err := os.WriteFile(path+".new", []byte(body), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(path+".new", path)

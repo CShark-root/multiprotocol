@@ -281,7 +281,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
                   const named = l.remark.toLowerCase().includes(t(`inbounds.protocols.${l.protocol}.title`).split(' ')[0].toLowerCase())
                   const label = named ? l.remark : `${l.remark} · ${kind}`
                   const works =
-                    t('connect.worksIn', { apps: l.apps.map((a) => t(`inbounds.apps.${a}`)).join('; ') }) +
+                    t('connect.worksIn', { apps: l.apps.map((a) => t(`inbounds.apps.${a}`)).join(', ') }) +
                     (l.inSub ? '' : ` · ${t('connect.notInSub')}`)
                   return l.url ? (
                     <ShareRow key={l.inboundId} label={label} hint={works} text={l.url} />

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"panel/internal/panel/service"
 	"panel/internal/panel/store"
 	"panel/internal/shared/version"
 )
@@ -166,4 +167,38 @@ func serverClock() map[string]any {
 	now := time.Now()
 	zone, offset := now.Zone()
 	return map[string]any{"time": now.Format("15:04"), "zone": zone, "offset": offset / 60}
+}
+
+// coreVersions — версии ядер для выбора, как в 3x-ui.
+func (s *server) coreVersions(w http.ResponseWriter, r *http.Request) {
+	if s.Cores == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "cores": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"supported": s.Cores.Supported(), "cores": s.Cores.Versions(r.Context())})
+}
+
+func (s *server) installCoreVersion(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Core    string `json:"core"`
+		Version string `json:"version"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if s.Cores == nil {
+		writeError(w, http.StatusNotImplemented, "unsupported", "no local cores")
+		return
+	}
+	if err := s.Cores.Install(r.Context(), in.Core, in.Version); err != nil {
+		if errors.Is(err, service.ErrUpdateBusy) {
+			writeError(w, http.StatusConflict, "busy", "an update is already running")
+			return
+		}
+		s.handleError(w, r, err)
+		return
+	}
+	s.Store.AddAudit(r.Context(), store.AuditEntry{AdminID: adminFrom(r.Context()).ID, Action: "cores.install", TargetType: "system",
+		Diff: map[string]any{"core": in.Core, "version": in.Version}}, time.Now())
+	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
 }

@@ -15,6 +15,13 @@ cores=0 only=0
 grep -qx 'cores=1' "$REQ" && cores=1
 # cores-only=1: только ядра, без переустановки панели (ночная автопроверка).
 grep -qx 'cores-only=1' "$REQ" && only=1
+# core=ядро@версия — какие ядра и какие версии ставить (update-cores.sh проверит
+# формат ещё раз). Не больше трёх строк.
+targets=()
+while IFS= read -r line; do
+  [[ $line =~ ^core=((xray|hysteria|sing-box)@(latest|[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}))$ ]] && targets+=("${BASH_REMATCH[1]}")
+done < <(head -n 20 "$REQ")
+targets=("${targets[@]:0:3}")
 rm -f "$REQ"
 : >"$LOG"
 chown panel:panel "$LOG"
@@ -22,7 +29,7 @@ chmod 0640 "$LOG"
 if ((only)); then
   {
     echo "== $(date -Is) core update started"
-    if bash /usr/local/lib/panel/update-cores.sh; then echo "== $(date -Is) done"; else echo "== $(date -Is) failed"; fi
+    if bash /usr/local/lib/panel/update-cores.sh "${targets[@]}"; then echo "== $(date -Is) done"; else echo "== $(date -Is) failed"; fi
   } >>"$LOG" 2>&1
   exit 0
 fi

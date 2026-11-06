@@ -99,6 +99,8 @@ func New(d Deps) http.Handler {
 				r.Get("/system/update", s.updateStatus)
 				r.Post("/system/update", s.startUpdate)
 				r.Get("/system/cores-auto", s.coresAuto)
+				r.Get("/system/cores/versions", s.coreVersions)
+				r.Post("/system/cores/install", s.installCoreVersion)
 				r.Get("/nodes", s.listNodes)
 				r.Post("/nodes", s.createNode)
 				r.Put("/nodes/{id}", s.updateNode)

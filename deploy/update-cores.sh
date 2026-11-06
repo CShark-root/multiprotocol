@@ -8,6 +8,10 @@
 # Затем перезапуск панели (ядра — её дочерние процессы) и проверка, что
 # обновлённые ядра поднялись. Если нет — возвращается старый бинарь.
 # Итог пишется в /var/lib/panel/cores-update.json, панель сообщит о нём.
+#
+# Аргументы «ядро@версия» (xray@26.7.28, sing-box@latest) — поставить только
+# эти ядра и эти версии (выбор во вкладке «Обслуживание»). Без аргументов —
+# все ядра до последних версий.
 set -uo pipefail
 LIB=/usr/local/lib/panel
 DATA=/var/lib/panel
@@ -25,8 +29,10 @@ version() { # $1 = ядро
 config_ok() { # новый бинарь принимает текущий конфиг?
   local bin=$LIB/$1/$1
   case $1 in
-    xray) [[ ! -f $DATA/xray/config.json ]] || XRAY_LOCATION_ASSET=$DATA/geo "$bin" run -test -c "$DATA/xray/config.json" >/dev/null ;;
-    sing-box) [[ ! -f $DATA/sing-box/config.json ]] || "$bin" check -c "$DATA/sing-box/config.json" >/dev/null ;;
+    # Проверка от пользователя panel, как ядро потом и работает: под root Xray
+    # пробует поднять настоящий интерфейс WireGuard (WARP) и падает на этом.
+    xray) [[ ! -f $DATA/xray/config.json ]] || runuser -u panel -- env XRAY_LOCATION_ASSET=$DATA/geo "$bin" run -test -c "$DATA/xray/config.json" >/tmp/core-check.log 2>&1 ;;
+    sing-box) [[ ! -f $DATA/sing-box/config.json ]] || runuser -u panel -- "$bin" check -c "$DATA/sing-box/config.json" >/tmp/core-check.log 2>&1 ;;
     hysteria) [[ -n $(version hysteria) ]] ;; # у hysteria нет проверки конфига
   esac
 }
@@ -49,22 +55,47 @@ restore() { # $1 = ядро
   mv -f "$LIB/$1/$1.prev" "$LIB/$1/$1"
 }
 
+# Что ставить: ядро → версия (latest или N.N.N). Чужие строки отбрасываются.
+declare -A target
+if (($#)); then
+  for a in "$@"; do
+    if [[ $a =~ ^(xray|hysteria|sing-box)@(latest|[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4})$ ]]; then
+      target[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
+    else
+      echo "пропускаю непонятный запрос: $a"
+    fi
+  done
+else
+  target=([xray]=latest [hysteria]=latest [sing-box]=latest)
+fi
+
+# tagOf — тег релиза для версии: у Hysteria2 теги вида app/v2.13.0.
+tagOf() { [[ $1 == hysteria ]] && echo "app/v$2" || echo "v$2"; }
+
 updated=() failed=() rolled=()
 declare -A was_running from to
 for core in xray hysteria sing-box; do
+  [[ -n ${target[$core]:-} ]] || continue
   bin=$LIB/$core/$core
   script=$LIB/install-${core//-/}.sh
   [[ -x $bin && -f $script ]] || continue
   running "$core" && was_running[$core]=1
   old=$(version "$core")
-  want=$(latest "$core")
+  want=${target[$core]}
+  [[ $want == latest ]] && want=$(latest "$core")
   if [[ -n $want && ${old#v} == "$want" ]]; then
-    echo "$core $old — последняя версия"
+    echo "$core $old — эта версия уже стоит"
     continue
   fi
-  echo "==> $core (сейчас $old, доступна ${want:-?})"
+  echo "==> $core (сейчас $old, ставлю ${want:-?})"
   cp -a "$bin" "$bin.prev"
-  if ! bash "$script"; then
+  if [[ -z $want ]]; then
+    echo "не узнать последнюю версию $core — GitHub не ответил"
+    rm -f "$bin.prev"
+    failed+=("$core")
+    continue
+  fi
+  if ! bash "$script" "$(tagOf "$core" "$want")"; then
     echo "установка $core не удалась, оставляю $old"
     restore "$core"
     failed+=("$core")
@@ -82,7 +113,8 @@ for core in xray hysteria sing-box; do
     continue
   fi
   if ! config_ok "$core"; then
-    echo "$core $new не принимает текущий конфиг, возвращаю $old"
+    echo "$core $new не принимает текущий конфиг, возвращаю $old:"
+    grep -viE "^(xray [0-9]|a unified)" /tmp/core-check.log | tail -n 5
     restore "$core"
     failed+=("$core")
     continue

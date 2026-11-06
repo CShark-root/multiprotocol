@@ -180,21 +180,21 @@ export type Protocol = 'vless' | 'trojan' | 'shadowsocks' | 'vmess' | 'hysteria2
 export type Transport = 'xhttp' | 'tcp' | 'grpc' | 'ws' | 'quic'
 
 /** Client app families, by the core inside the app (see service.ClientApps). */
-export type AppFamily = 'xray' | 'singbox'
+export type AppFamily = 'xray' | 'mihomo' | 'singbox'
 
 /** What the wizard offers per protocol; mirrors the server's protocol registry. */
 export const protocolSpecs: Record<
   Protocol,
   { transports: Transport[]; core: 'xray' | 'hysteria' | 'singbox'; network: string; apps: AppFamily[] }
 > = {
-  vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray'] },
-  trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray'] },
-  shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp', apps: ['xray', 'singbox'] },
-  vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp', apps: ['xray', 'singbox'] },
-  hysteria2: { transports: ['quic'], core: 'hysteria', network: 'udp', apps: ['xray', 'singbox'] },
-  tuic: { transports: ['quic'], core: 'singbox', network: 'udp', apps: ['singbox'] },
-  anytls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['singbox'] },
-  shadowtls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['singbox'] },
+  vless: { transports: ['xhttp', 'tcp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo'] },
+  trojan: { transports: ['tcp', 'xhttp', 'grpc'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo'] },
+  shadowsocks: { transports: ['tcp'], core: 'xray', network: 'tcp+udp', apps: ['xray', 'mihomo', 'singbox'] },
+  vmess: { transports: ['ws', 'tcp'], core: 'xray', network: 'tcp', apps: ['xray', 'mihomo', 'singbox'] },
+  hysteria2: { transports: ['quic'], core: 'hysteria', network: 'udp', apps: ['xray', 'mihomo', 'singbox'] },
+  tuic: { transports: ['quic'], core: 'singbox', network: 'udp', apps: ['mihomo', 'singbox'] },
+  anytls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['mihomo', 'singbox'] },
+  shadowtls: { transports: ['tcp'], core: 'singbox', network: 'tcp', apps: ['mihomo', 'singbox'] },
 }
 export const protocolOrder = Object.keys(protocolSpecs) as Protocol[]
 
@@ -537,4 +537,19 @@ export const extras = {
   mainBilling: () => request<ServerBilling>('GET', 'system/billing'),
   saveMainBilling: (paidUntil: string, price: string) => request<ServerBilling>('PUT', 'system/billing', { paidUntil, price }),
   saveNodeBilling: (id: number, paidUntil: string, price: string) => request<ServerBilling>('PUT', `nodes/${id}/billing`, { paidUntil, price }),
+}
+
+// Версии ядер для выбора: последние стабильные релизы, рекомендуемая, закреплённая.
+export type CoreVersions = {
+  core: 'xray' | 'hysteria' | 'singbox'
+  current: string
+  pinned?: string
+  latest: string
+  versions: { version: string; published: string; recommended?: boolean; note?: 'realityOld' | 'realityMlkem' }[]
+  error?: string
+}
+
+export const coreVersions = {
+  list: () => request<{ supported: boolean; cores: CoreVersions[] }>('GET', 'system/cores/versions'),
+  install: (core: string, version: string) => request<{ started: boolean }>('POST', 'system/cores/install', { core, version }),
 }
