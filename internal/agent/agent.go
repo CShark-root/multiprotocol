@@ -118,7 +118,12 @@ func (a *Agent) Health(ctx context.Context) NodeHealth {
 		Cores:              []CoreHealth{},
 	}
 	for _, ad := range a.adapters {
-		h.Cores = append(h.Cores, CoreHealth{Name: ad.Name(), HealthStatus: ad.Health(ctx)})
+		st := ad.Health(ctx)
+		// Встроенный распределитель по SNI — не ядро: показываем его, только когда он делит порт.
+		if ad.Name() == "sniproxy" && !st.Installed {
+			continue
+		}
+		h.Cores = append(h.Cores, CoreHealth{Name: ad.Name(), HealthStatus: st})
 	}
 	return h
 }

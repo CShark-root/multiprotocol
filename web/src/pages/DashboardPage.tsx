@@ -102,9 +102,9 @@ export function DashboardPage() {
               <ul className="mt-4 space-y-2.5">
                 {agent.cores.map((c) => (
                   <li key={c.name} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium capitalize">
-                      {c.name}
-                      {c.version && <span className="ml-1.5 font-normal text-muted-foreground">{c.version}</span>}
+                    <span className={c.name === 'sniproxy' ? 'font-medium' : 'font-medium capitalize'}>
+                      {c.name === 'sniproxy' ? t('dashboard.sniproxy') : c.name}
+                      {c.version && c.name !== 'sniproxy' && <span className="ml-1.5 font-normal text-muted-foreground">{c.version}</span>}
                     </span>
                     {!c.installed ? (
                       <Badge tone="warning">{t('dashboard.coreMissing')}</Badge>

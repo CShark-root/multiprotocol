@@ -69,6 +69,7 @@ export const ru = {
     aria: 'Трафик по дням за {{days}} дн., всего {{total}}. Стрелки влево и вправо — по дням.',
   },
   dashboard: {
+    sniproxy: 'Общий порт 443 (Xray + sing-box)',
     usersTitle: 'Пользователи',
     usersTotal: 'всего',
     online: 'Онлайн сейчас',
