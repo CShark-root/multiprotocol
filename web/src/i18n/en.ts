@@ -93,7 +93,7 @@ export const en: Messages = {
     serverSwap: 'Swap',
     serverNoSwap: 'none',
     serverTcp: 'TCP',
-    serverNoBbr: 'BBR is off; reinstall the panel and the installer turns it on',
+    serverNoBbr: 'BBR is off: update the panel, the installer turns it on over the host defaults',
     serverCpu: 'CPU',
     serverCpuValue_one: '{{count}} core · {{procs}} processes',
     serverCpuValue_few: '{{count}} cores · {{procs}} processes',

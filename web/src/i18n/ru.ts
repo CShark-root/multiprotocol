@@ -91,7 +91,7 @@ export const ru = {
     serverSwap: 'Swap',
     serverNoSwap: 'нет',
     serverTcp: 'TCP',
-    serverNoBbr: 'BBR не включён — переустановите панель, установщик его включит',
+    serverNoBbr: 'BBR не включён: обновите панель — установщик включит его и перебьёт настройку хостера',
     serverCpu: 'Процессор',
     serverCpuValue_one: '{{count}} ядро · {{procs}} процессов',
     serverCpuValue_few: '{{count}} ядра · {{procs}} процессов',

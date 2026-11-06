@@ -54,15 +54,19 @@ done
 # Network tuning in a file of our own: BBR for TCP (Xray) and larger socket
 # buffers for QUIC (Hysteria2, TUIC). Nothing Docker or Amnezia rely on
 # (ip_forward and the like) is touched.
+# Имя файла сортируется после 99-sysctl.conf: у части хостеров (Hostkey) в
+# /etc/sysctl.conf свой алгоритм (hybla), и он иначе перебил бы наш BBR.
 modprobe tcp_bbr 2>/dev/null || true
-cat > /etc/sysctl.d/90-panel.conf <<'SYSCTL'
+echo tcp_bbr > /etc/modules-load.d/panel-bbr.conf
+rm -f /etc/sysctl.d/90-panel.conf
+cat > /etc/sysctl.d/99-zz-panel.conf <<'SYSCTL'
 # Written by the panel installer.
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 SYSCTL
-sysctl -q -p /etc/sysctl.d/90-panel.conf || echo "note: some network settings were not applied" >&2
+sysctl -q -p /etc/sysctl.d/99-zz-panel.conf || echo "note: some network settings were not applied" >&2
 
 # Узел: на этом сервере только агент, конфиги он берёт у главной панели.
 # NODE_JOIN — код из вкладки «Серверы»; agent.json — узел уже подключён
