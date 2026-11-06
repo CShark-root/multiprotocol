@@ -288,7 +288,7 @@ func TestTestKit(t *testing.T) {
 	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
 
 	kit := c.expect(201, "POST", "/api/inbounds/test-kit", map[string]any{})
-	if kit["inbounds"].(float64) != 11 {
+	if kit["inbounds"].(float64) != 12 { // 11 + VLESS на ядре sing-box
 		t.Fatalf("test kit: %v", kit)
 	}
 	c.expect(409, "POST", "/api/inbounds/test-kit", map[string]any{})
@@ -296,7 +296,7 @@ func TestTestKit(t *testing.T) {
 	code, body := c.json("GET", "/api/inbounds", nil)
 	var list []map[string]any
 	json.Unmarshal(body, &list)
-	if code != 200 || len(list) != 11 {
+	if code != 200 || len(list) != 12 {
 		t.Fatalf("inbounds after test kit: %d %d", code, len(list))
 	}
 	ports := map[string]bool{}
@@ -321,7 +321,7 @@ func TestTestKit(t *testing.T) {
 			withURL++
 		}
 	}
-	if withURL != 10 { // all but ShadowTLS
+	if withURL != 11 { // all but ShadowTLS
 		t.Fatalf("links with a share URL: %d", withURL)
 	}
 
@@ -343,7 +343,7 @@ func TestTestKit(t *testing.T) {
 	}
 
 	del := c.expect(200, "DELETE", "/api/inbounds/test-kit", nil)
-	if del["inbounds"].(float64) != 11 {
+	if del["inbounds"].(float64) != 12 {
 		t.Fatalf("delete test kit: %v", del)
 	}
 	if code, body := c.json("GET", "/api/users", nil); code != 200 || string(body) != "[]\n" {
