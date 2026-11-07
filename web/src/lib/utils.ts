@@ -51,3 +51,9 @@ export function formatBitrate(bytesPerSec: number, locale: string): string {
   const v = bits / 1000 ** i
   return `${v.toLocaleString(locale, { maximumFractionDigits: v < 10 ? 1 : 0 })} ${units[i]}`
 }
+
+// loadPercent — средняя нагрузка Linux в процентах от числа ядер: 1.0 на одном
+// ядре = 100%. Бывает больше 100%, когда задачи стоят в очереди.
+export function loadPercent(load: number, cpus: number): number {
+  return cpus > 0 ? Math.round((load / cpus) * 100) : 0
+}

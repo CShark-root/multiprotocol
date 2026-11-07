@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
 import { ArrowDown, ArrowUp, Check, Clock, Cpu, Gauge, MemoryStick, Power, RotateCw, Wifi } from 'lucide-react'
 import { ApiError, api } from '@/lib/api'
-import { formatBitrate, formatBytes, formatDuration } from '@/lib/utils'
+import { formatBitrate, formatBytes, formatDuration, loadPercent } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Ring } from '@/components/ui'
 import type { User } from '@/lib/api'
 import { TrafficChart } from '@/components/TrafficChart'
@@ -85,8 +85,12 @@ export function DashboardPage() {
         <Stat
           icon={<Cpu className="h-4 w-4" />}
           label={t('dashboard.load')}
-          value={sys ? `${sys.load1.toFixed(2)} · ${sys.load5.toFixed(2)} · ${sys.load15.toFixed(2)}` : '—'}
-          hint={t('dashboard.loadHint')}
+          value={sys?.cpus ? `${loadPercent(sys.load1, sys.cpus)}%` : '—'}
+          hint={
+            sys?.cpus
+              ? t('dashboard.loadHint', { l1: sys.load1.toFixed(2), l5: sys.load5.toFixed(2), l15: sys.load15.toFixed(2), cpus: sys.cpus })
+              : undefined
+          }
         />
         <Stat
           icon={<Clock className="h-4 w-4" />}

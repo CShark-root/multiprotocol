@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreditCard, Info, KeyRound, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { ApiError, api, extras, type ServerBilling, type ServerNode, type SystemInfo } from '@/lib/api'
-import { formatBitrate, formatBytes, formatDuration } from '@/lib/utils'
+import { formatBitrate, formatBytes, formatDuration, loadPercent } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader } from '@/components/ui'
 import { CopyButton } from '@/components/share'
 
@@ -60,11 +60,12 @@ export function ServersPage() {
   )
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl bg-muted/60 p-2.5">
+    <div className="min-w-0 rounded-xl bg-muted/60 p-2.5">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate font-medium">{value}</div>
+      <div className="mt-0.5 font-medium break-words">{value}</div>
+      {sub && <div className="mt-0.5 text-xs break-words text-muted-foreground">{sub}</div>}
     </div>
   )
 }
@@ -74,13 +75,25 @@ function Facts({ h }: { h: NonNullable<SystemInfo['localAgent']> }) {
   const { t, i18n } = useTranslation()
   const lng = i18n.language
   const s = h.system
-  const mem = s.memTotal ? `${formatBytes(s.memTotal - s.memAvailable, lng)} / ${formatBytes(s.memTotal, lng)}` : '—'
+  const used = s.memTotal - s.memAvailable
   return (
     <>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-        <Fact label={t('servers.load')} value={s.cpus ? `${s.load1.toFixed(2)} · ${s.cpus} CPU` : '—'} />
-        <Fact label={t('servers.memory')} value={mem} />
-        <Fact label={t('servers.net')} value={s.netIface ? `↓ ${formatBitrate(s.netRxBps, lng)} ↑ ${formatBitrate(s.netTxBps, lng)}` : '—'} />
+        <Fact
+          label={t('servers.load')}
+          value={s.cpus ? `${loadPercent(s.load1, s.cpus)}%` : '—'}
+          sub={s.cpus ? t('servers.loadSub', { load: s.load1.toFixed(2), cpus: s.cpus }) : undefined}
+        />
+        <Fact
+          label={t('servers.memory')}
+          value={s.memTotal ? `${Math.round((used / s.memTotal) * 100)}%` : '—'}
+          sub={s.memTotal ? `${formatBytes(used, lng)} / ${formatBytes(s.memTotal, lng)}` : undefined}
+        />
+        <Fact
+          label={t('servers.net')}
+          value={s.netIface ? `↓ ${formatBitrate(s.netRxBps, lng)}` : '—'}
+          sub={s.netIface ? `↑ ${formatBitrate(s.netTxBps, lng)}` : undefined}
+        />
         <Fact label={t('servers.uptime')} value={s.uptimeSeconds ? formatDuration(s.uptimeSeconds, lng) : '—'} />
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
