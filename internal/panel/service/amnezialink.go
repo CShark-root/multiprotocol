@@ -31,13 +31,36 @@ func (s *Syncer) collectAmnezia(ctx context.Context) error {
 	}
 	s.amneziaSeen = &st
 	links, err := s.store.ListAmneziaLinks(ctx)
-	if err != nil || len(links) == 0 {
+	if err != nil {
 		return err
 	}
+	linked := map[[2]string]bool{}
+	for _, l := range links {
+		linked[[2]string{l.Container, l.Key}] = true
+	}
 	clients := map[[2]string]amnezia.Client{}
+	// Непривязанные клиенты (роутеры и т. п.) идут в общий трафик сервера.
+	// Их прошлые счётчики помним только в памяти: после перезапуска панели
+	// первый круг лишь запоминает значения.
+	var serverBytes int64
+	seen := map[[2]string][2]int64{}
 	for _, c := range st.Containers {
 		for _, cl := range c.Clients {
-			clients[[2]string{c.Name, cl.Key}] = cl
+			k := [2]string{c.Name, cl.Key}
+			clients[k] = cl
+			if linked[k] {
+				continue
+			}
+			if prev, ok := s.amneziaFree[k]; ok {
+				serverBytes += growth(prev[0], cl.RxBytes) + growth(prev[1], cl.TxBytes)
+			}
+			seen[k] = [2]int64{cl.RxBytes, cl.TxBytes}
+		}
+	}
+	s.amneziaFree = seen
+	if serverBytes > 0 {
+		if err := s.store.AddServerTraffic(ctx, serverBytes, s.now()); err != nil {
+			return err
 		}
 	}
 	byUser := map[int64]int64{}

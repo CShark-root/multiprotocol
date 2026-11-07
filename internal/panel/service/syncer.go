@@ -43,10 +43,11 @@ type Syncer struct {
 	userStatus map[int64]Status
 	coreDown   map[string]bool
 
-	amnezia     AmneziaClients  // nil: без связки с Amnezia
-	amneziaSeen *amnezia.Status // что помощник показал в этом круге
-	nodes       *Nodes          // nil: только этот сервер
-	mainHost    string          // адрес главного сервера для каскадов
+	amnezia     AmneziaClients         // nil: без связки с Amnezia
+	amneziaSeen *amnezia.Status        // что помощник показал в этом круге
+	amneziaFree map[[2]string][2]int64 // прошлые счётчики непривязанных клиентов AmneziaWG
+	nodes       *Nodes                 // nil: только этот сервер
+	mainHost    string                 // адрес главного сервера для каскадов
 }
 
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {

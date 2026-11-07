@@ -314,6 +314,8 @@ export type UserLinks = {
 export type SystemInfo = {
   version: string
   publicHost: string
+  ipv4: string
+  ipv6: string
   sync: { lastSync: string | null; lastError: string } | null
   localAgent: {
     hostname: string

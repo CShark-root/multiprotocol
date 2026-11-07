@@ -39,7 +39,18 @@ export function DashboardPage() {
 
   return (
     <>
-      <PageHeader title={t('dashboard.hello', { name: admin.username })} subtitle={t('dashboard.subtitle')} />
+      <PageHeader
+        title={t('dashboard.hello', { name: admin.username })}
+        subtitle={t('dashboard.subtitle')}
+        actions={
+          (system.data?.ipv4 || system.data?.ipv6) && (
+            <div className="flex flex-wrap gap-2">
+              {system.data.ipv4 && <ServerIP label="IPv4" ip={system.data.ipv4} />}
+              {system.data.ipv6 && <ServerIP label="IPv6" ip={system.data.ipv6} />}
+            </div>
+          )
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
@@ -329,5 +340,22 @@ function UsersCard({ users, online }: { users: User[]; online: number }) {
         </ul>
       </div>
     </Card>
+  )
+}
+
+// Адрес сервера размыт, пока на него не нажали: главную часто показывают на экране.
+function ServerIP({ label, ip }: { label: string; ip: string }) {
+  const { t } = useTranslation()
+  const [shown, setShown] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => setShown((v) => !v)}
+      title={shown ? t('dashboard.ipHide') : t('dashboard.ipShow')}
+      className="flex max-w-full items-center gap-2 rounded-full border bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+    >
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <span className={'truncate font-mono transition-[filter] duration-200 ' + (shown ? '' : 'blur-[5px] select-none')}>{ip}</span>
+    </button>
   )
 }

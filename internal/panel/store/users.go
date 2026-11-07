@@ -270,3 +270,12 @@ func unixOrNull(t *time.Time) sql.NullInt64 {
 	}
 	return sql.NullInt64{Int64: t.Unix(), Valid: true}
 }
+
+// AddServerTraffic добавляет трафик, у которого нет пользователя панели
+// (клиенты Amnezia без привязки), в общий трафик сервера (user_id 0).
+func (s *Store) AddServerTraffic(ctx context.Context, bytes int64, now time.Time) error {
+	day := now.Local().Format(time.DateOnly)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO traffic_daily (user_id, day, bytes) VALUES (0, ?, ?)
+		ON CONFLICT (user_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`, day, bytes)
+	return err
+}

@@ -7,6 +7,7 @@ import (
 	"panel/internal/agent"
 	"panel/internal/panel/backup"
 	"panel/internal/panel/store"
+	"panel/internal/panel/tlsutil"
 	"panel/internal/shared/version"
 )
 
@@ -20,10 +21,13 @@ type systemDTO struct {
 	PublicHost string            `json:"publicHost"`
 	LocalAgent *agent.NodeHealth `json:"localAgent"`
 	Sync       *syncDTO          `json:"sync"`
+	IPv4       string            `json:"ipv4"`
+	IPv6       string            `json:"ipv6"`
 }
 
 func (s *server) system(w http.ResponseWriter, r *http.Request) {
 	dto := systemDTO{Version: version.Version, PublicHost: s.PublicHost}
+	dto.IPv4, dto.IPv6 = serverIPs()
 	if s.Agent != nil {
 		h := s.Agent.Health(r.Context())
 		dto.LocalAgent = &h
@@ -102,4 +106,36 @@ func (s *server) downloadBackup(w http.ResponseWriter, r *http.Request) {
 	if err := backup.Write(r.Context(), s.Store, s.Panel.DataDir, w); err != nil {
 		s.Logger.Error("backup", "err", err)
 	}
+}
+
+// serverIPs — адреса этого сервера для главной: публичные в приоритете,
+// частные (сервер за NAT, виртуалка) только если других нет.
+func serverIPs() (v4, v6 string) {
+	var p4, p6 string
+	for _, ip := range tlsutil.ReachableIPs() {
+		if !ip.IsGlobalUnicast() {
+			continue
+		}
+		private := ip.IsPrivate()
+		if ip.To4() != nil {
+			if !private && v4 == "" {
+				v4 = ip.String()
+			} else if private && p4 == "" {
+				p4 = ip.String()
+			}
+		} else {
+			if !private && v6 == "" {
+				v6 = ip.String()
+			} else if private && p6 == "" {
+				p6 = ip.String()
+			}
+		}
+	}
+	if v4 == "" {
+		v4 = p4
+	}
+	if v6 == "" {
+		v6 = p6
+	}
+	return v4, v6
 }

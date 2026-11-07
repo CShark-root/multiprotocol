@@ -71,6 +71,8 @@ export const en: Messages = {
     aria: 'Traffic per day over {{days}} days, {{total}} in total. Left and right arrows step through days.',
   },
   dashboard: {
+    ipShow: 'Click to reveal',
+    ipHide: 'Click to hide',
     sniproxy: 'Shared port 443 (Xray + sing-box)',
     usersTitle: 'Users',
     usersTotal: 'total',
