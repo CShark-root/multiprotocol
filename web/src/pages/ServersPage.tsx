@@ -126,6 +126,7 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
       onToken(d.command)
     },
   })
+  const [askToken, setAskToken] = useState(false)
   const seen = n.lastSeen && !n.lastSeen.startsWith('0001') ? new Date(n.lastSeen) : null
   const status = !seen ? (
     <Badge tone="warning">{t('servers.waiting')}</Badge>
@@ -136,6 +137,28 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
   )
   return (
     <Card>
+      {askToken && (
+        <Dialog open onClose={() => setAskToken(false)} title={t('servers.tokenTitle', { name: n.name })}>
+          <div className="space-y-4">
+            <p className="text-sm">{t('servers.tokenText')}</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setAskToken(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                variant="danger"
+                disabled={token.isPending}
+                onClick={() => {
+                  setAskToken(false)
+                  token.mutate()
+                }}
+              >
+                {t('servers.tokenConfirm')}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +176,7 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           <Button size="icon" variant="ghost" aria-label={t('servers.restart')} title={t('servers.restart')} disabled={!n.online || restart.isPending} onClick={() => restart.mutate()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button size="icon" variant="ghost" aria-label={t('servers.newCommand')} title={t('servers.newCommand')} disabled={token.isPending} onClick={() => token.mutate()}>
+          <Button size="icon" variant="ghost" aria-label={t('servers.newCommand')} title={t('servers.newCommand')} disabled={token.isPending} onClick={() => setAskToken(true)}>
             <KeyRound className="h-4 w-4" />
           </Button>
           <Button size="icon" variant="ghost" aria-label={t('servers.edit')} title={t('servers.edit')} onClick={onEdit}>
