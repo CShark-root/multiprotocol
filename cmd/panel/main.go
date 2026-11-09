@@ -230,7 +230,8 @@ func serve(args []string) int {
 	go billingSvc.Run(ctx)
 	usersSvc := service.NewUsers(st, changed)
 	go service.NewBot(service.BotDeps{
-		Notifier: notifier, Users: usersSvc, Agent: localAgent, Nodes: nodesSvc, Reboot: rebootFunc(*dev), SubBase: subBase, Log: log,
+		Notifier: notifier, Users: usersSvc, Store: st, Agent: localAgent, Nodes: nodesSvc, Routing: routingSvc, Billing: billingSvc,
+		Amnezia: amneziaRO, Reboot: rebootFunc(*dev), DataDir: *dataDir, SubBase: subBase, Log: log,
 	}).Run(ctx)
 
 	handler := api.New(api.Deps{

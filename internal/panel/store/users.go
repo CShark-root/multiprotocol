@@ -279,3 +279,29 @@ func (s *Store) AddServerTraffic(ctx context.Context, bytes int64, now time.Time
 		ON CONFLICT (user_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`, day, bytes)
 	return err
 }
+
+// UserTraffic — трафик одного пользователя за период (UserID 0 — без
+// пользователя: удалённые и клиенты Amnezia без привязки).
+type UserTraffic struct {
+	UserID int64
+	Bytes  int64
+}
+
+// TrafficTop — трафик по пользователям с `from` (YYYY-MM-DD), больше всех первым.
+func (s *Store) TrafficTop(ctx context.Context, from string) ([]UserTraffic, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT user_id, SUM(bytes) FROM traffic_daily WHERE day >= ?
+		GROUP BY user_id ORDER BY 2 DESC`, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserTraffic
+	for rows.Next() {
+		var t UserTraffic
+		if err := rows.Scan(&t.UserID, &t.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

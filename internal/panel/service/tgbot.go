@@ -4,40 +4,64 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"panel/internal/agent"
-	"panel/internal/panel/compile"
+	"panel/internal/amnezia"
+	"panel/internal/nodeproto"
 	"panel/internal/panel/store"
 	"panel/internal/panel/telegram"
 )
 
-// BotDeps is what the management bot can act on. Agent and Reboot may be nil.
+// BotDeps — то, чем управляет бот. Agent, Nodes, Routing, Billing, Amnezia и
+// Reboot могут быть nil: тогда соответствующих экранов нет.
 type BotDeps struct {
 	Notifier *Notifier
 	Users    *Users
+	Store    *store.Store
 	Agent    *agent.Agent
-	Nodes    *Nodes // nil: только этот сервер
+	Nodes    *Nodes
+	Routing  *Routing
+	Billing  *Billing
+	Amnezia  *amnezia.HelperClient
 	Reboot   func() error
-	SubBase  string // subscription URL prefix, the token is appended
+	DataDir  string
+	SubBase  string // начало ссылки подписки, к нему добавляется токен
 	Log      *slog.Logger
 }
 
-// Bot answers the admin's chat with a menu: server state, users (renew,
-// reset traffic, switch on/off, subscription link), core restart, backup and
-// reboot. It only ever talks to the chat saved in the Telegram settings, and
-// only while "control" is switched on.
+// Bot отвечает в чат админа меню: сводка, пользователи, серверы, трафик,
+// Amnezia, обслуживание. Говорит только с чатом из настроек Telegram и только
+// пока включено «Управление через бота».
 type Bot struct {
-	d    BotDeps
-	menu int64 // id of the live menu message, edited in place
+	d       BotDeps
+	menu    int64   // id живого сообщения с меню, его правим на месте
+	wiz     *wizard // мастер нового пользователя, nil — не идёт
+	cmdsFor string  // для какого токена уже задано меню команд
+}
+
+// wizard — новый пользователь в три шага: имя (текстом), лимит, срок.
+type wizard struct {
+	name  string
+	limit int64 // байты, 0 — без лимита
 }
 
 func NewBot(d BotDeps) *Bot { return &Bot{d: d} }
 
-const usersPerPage = 8
+// notifyPrefix помечает кнопки под уведомлениями: экран после них приходит
+// новым сообщением, а само уведомление остаётся в истории.
+const notifyPrefix = "n|"
+
+var botCommands = []telegram.Command{
+	{Command: "menu", Description: "Сводка"},
+	{Command: "users", Description: "Пользователи"},
+	{Command: "new", Description: "Новый пользователь"},
+	{Command: "servers", Description: "Серверы"},
+	{Command: "traffic", Description: "Трафик"},
+	{Command: "service", Description: "Обслуживание"},
+}
 
 // Run long-polls Telegram until ctx ends.
 func (b *Bot) Run(ctx context.Context) {
@@ -49,10 +73,15 @@ func (b *Bot) Run(ctx context.Context) {
 			sleep(ctx, 20*time.Second)
 			continue
 		}
-		if s.Token != token { // a new bot starts from a clean slate
-			token, offset, b.menu = s.Token, 0, 0
+		if s.Token != token { // новый бот начинает с чистого листа
+			token, offset, b.menu, b.wiz = s.Token, 0, 0, nil
 		}
 		bot := telegram.New(s.Token)
+		if b.cmdsFor != s.Token {
+			if err := bot.SetCommands(ctx, botCommands); err == nil {
+				b.cmdsFor = s.Token
+			}
+		}
 		ups, err := bot.Updates(ctx, offset, 50*time.Second)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -83,20 +112,28 @@ func (b *Bot) handle(ctx context.Context, bot *telegram.Bot, s TelegramSettings,
 	switch {
 	case u.Message != nil:
 		if u.Message.Chat.ID != s.ChatID {
-			return // strangers get no answer at all
+			return // чужим не отвечаем вообще
 		}
-		text, kb := b.screen(ctx, "m")
+		text, kb := b.onText(ctx, strings.TrimSpace(u.Message.Text))
 		if id, err := bot.SendMenu(ctx, s.ChatID, text, kb); err == nil {
 			b.menu = id
+		} else {
+			b.d.Log.Warn("telegram bot", "err", err)
 		}
 	case u.Callback != nil && u.Callback.Message != nil:
 		if u.Callback.Message.Chat.ID != s.ChatID {
 			return
 		}
-		data := u.Callback.Data
+		data, fromNotice := strings.CutPrefix(u.Callback.Data, notifyPrefix)
 		toast := b.act(ctx, bot, s, &data)
 		bot.Answer(ctx, u.Callback.ID, toast)
 		text, kb := b.screen(ctx, data)
+		if fromNotice {
+			if id, err := bot.SendMenu(ctx, s.ChatID, text, kb); err == nil {
+				b.menu = id
+			}
+			return
+		}
 		b.menu = u.Callback.Message.ID
 		if err := bot.EditMenu(ctx, s.ChatID, b.menu, text, kb); err != nil {
 			b.d.Log.Warn("telegram bot", "err", err)
@@ -104,39 +141,76 @@ func (b *Bot) handle(ctx context.Context, bot *telegram.Bot, s TelegramSettings,
 	}
 }
 
-// act performs the action behind a button and may change which screen
-// follows. It returns a short confirmation for the toast.
+// onText — команда, шаг мастера (имя) или поиск пользователя по имени.
+func (b *Bot) onText(ctx context.Context, text string) (string, telegram.Keyboard) {
+	if cmd, ok := strings.CutPrefix(text, "/"); ok {
+		cmd, _, _ = strings.Cut(cmd, "@") // /users@my_bot в группах
+		cmd, _, _ = strings.Cut(cmd, " ")
+		b.wiz = nil
+		switch cmd {
+		case "users":
+			return b.screen(ctx, "u:a:0")
+		case "new":
+			b.wiz = &wizard{}
+			return b.screen(ctx, "nw")
+		case "servers":
+			return b.screen(ctx, "sv")
+		case "traffic":
+			return b.screen(ctx, "tr:7")
+		case "service":
+			return b.screen(ctx, "mt")
+		}
+		return b.screen(ctx, "m")
+	}
+	if b.wiz != nil && b.wiz.name == "" {
+		if !userNameRe.MatchString(text) {
+			return "В имени можно буквы, цифры и знаки _ . - без пробелов, до 64 символов. Напишите ещё раз:", telegram.Keyboard{{btn("Отмена", "nx")}}
+		}
+		b.wiz.name = text
+		return b.screen(ctx, "nl")
+	}
+	return b.searchScreen(ctx, text)
+}
+
+// act выполняет действие кнопки и может сменить экран, который покажется
+// после. Возвращает короткий ответ для всплывашки.
 func (b *Bot) act(ctx context.Context, bot *telegram.Bot, s TelegramSettings, data *string) string {
 	parts := strings.Split(*data, ":")
 	id := int64(0)
 	if len(parts) > 1 {
 		id, _ = strconv.ParseInt(parts[1], 10, 64)
 	}
+	arg := func(i int) int {
+		if len(parts) > i {
+			v, _ := strconv.Atoi(parts[i])
+			return v
+		}
+		return 0
+	}
+	card := "c:" + strconv.FormatInt(id, 10)
 	users := b.d.Users
 	switch parts[0] {
-	case "x": // x:<id>:<days>
-		days := 30
-		if len(parts) > 2 {
-			days, _ = strconv.Atoi(parts[2])
-		}
+	case "x": // x:<id>:<дни>
+		*data = card
 		u, err := users.Get(ctx, id)
-		if err == nil && u.ExpireAt == nil {
-			*data = "c:" + parts[1]
+		if err != nil {
+			return "Пользователь не найден"
+		}
+		if u.ExpireAt == nil {
 			return "Срок не ограничен"
 		}
-		*data = "c:" + parts[1]
-		if _, err := users.Extend(ctx, 0, id, days); err != nil {
+		if _, err := users.Extend(ctx, 0, id, arg(2)); err != nil {
 			return "Не получилось: " + err.Error()
 		}
-		return fmt.Sprintf("Продлено на %d дн.", days)
+		return "Продлено на " + days(arg(2))
 	case "r":
-		*data = "c:" + parts[1]
+		*data = card
 		if _, err := users.ResetTraffic(ctx, 0, id); err != nil {
 			return "Не получилось: " + err.Error()
 		}
 		return "Трафик сброшен"
 	case "t":
-		*data = "c:" + parts[1]
+		*data = card
 		u, err := users.Get(ctx, id)
 		if err != nil {
 			return "Пользователь не найден"
@@ -150,17 +224,76 @@ func (b *Bot) act(ctx context.Context, bot *telegram.Bot, s TelegramSettings, da
 			return "Включён"
 		}
 		return "Выключен"
-	case "s":
-		*data = "c:" + parts[1]
+	case "L": // L:<id>:<ГБ>, 0 — без лимита
+		*data = card
 		u, err := users.Get(ctx, id)
 		if err != nil {
 			return "Пользователь не найден"
 		}
-		// A separate message: easy to copy or forward to the person.
-		bot.Send(ctx, s.ChatID, "Подписка «"+u.Name+"»:\n"+b.d.SubBase+u.SubToken)
+		in := inputOf(u)
+		in.TrafficLimit = int64(arg(2)) << 30
+		if _, err := users.Update(ctx, 0, id, in); err != nil {
+			return "Не получилось: " + err.Error()
+		}
+		if in.TrafficLimit == 0 {
+			return "Лимит снят"
+		}
+		return fmt.Sprintf("Лимит %d ГБ", arg(2))
+	case "s":
+		*data = card
+		u, err := users.Get(ctx, id)
+		if err != nil {
+			return "Пользователь не найден"
+		}
+		b.sendSubscription(ctx, bot, s, u)
 		return ""
-	case "rc!":
+	case "d!":
+		*data = "u:a:0"
+		if err := users.Delete(ctx, 0, id); err != nil {
+			return "Не получилось: " + err.Error()
+		}
+		return "Удалён"
+	case "nl": // nl:<ГБ> — шаг мастера: лимит
+		if b.wiz == nil {
+			*data = "m"
+			return "Мастер устарел, начните заново: /new"
+		}
+		b.wiz.limit = int64(arg(1)) << 30
+		*data = "nt"
+		return ""
+	case "nt": // nt:<дни>, 0 — бессрочно: создаём
+		w := b.wiz
+		if w == nil || w.name == "" {
+			*data = "m"
+			return "Мастер устарел, начните заново: /new"
+		}
+		in := UserInput{Name: w.name, Enabled: true, TrafficLimit: w.limit, ResetPeriod: "none"}
+		if w.limit > 0 {
+			in.ResetPeriod = "month"
+		}
+		if d := arg(1); d > 0 {
+			t := users.Now().AddDate(0, 0, d)
+			in.ExpireAt = &t
+		}
+		u, err := users.Create(ctx, 0, in)
+		if err != nil {
+			*data = "nt"
+			return "Не получилось: " + err.Error()
+		}
+		b.wiz = nil
+		*data = "c:" + strconv.FormatInt(u.ID, 10)
+		b.sendSubscription(ctx, bot, s, u)
+		return "Создан"
+	case "nw0":
+		b.wiz = &wizard{}
+		*data = "nw"
+		return ""
+	case "nx":
+		b.wiz = nil
 		*data = "m"
+		return "Отменено"
+	case "rc!":
+		*data = "mt"
 		if b.d.Agent == nil {
 			return "Ядра здесь не управляются"
 		}
@@ -168,14 +301,30 @@ func (b *Bot) act(ctx context.Context, bot *telegram.Bot, s TelegramSettings, da
 			return "Ошибка: " + err.Error()
 		}
 		return "Ядра перезапущены"
+	case "nr!":
+		*data = "sv"
+		if b.d.Nodes == nil {
+			return ""
+		}
+		b.d.Nodes.Command(id, nodeproto.CmdRestartCores)
+		return "Команда отправлена"
+	case "wc":
+		*data = "mt"
+		return b.checkWarp(ctx)
 	case "bk":
-		*data = "m"
+		*data = "mt"
 		if err := b.d.Notifier.BackupNow(ctx); err != nil {
 			return "Копия не отправлена: " + err.Error()
 		}
 		return "Копия отправлена"
+	case "up!":
+		*data = "mt"
+		if err := RequestUpdate(b.d.DataDir, false); err != nil {
+			return "Ошибка: " + err.Error()
+		}
+		return "Обновление запущено, панель перезапустится через минуту"
 	case "rb!":
-		*data = "m"
+		*data = "mt"
 		if b.d.Reboot == nil {
 			return "Перезагрузка недоступна"
 		}
@@ -187,6 +336,35 @@ func (b *Bot) act(ctx context.Context, bot *telegram.Bot, s TelegramSettings, da
 	return ""
 }
 
+// sendSubscription отправляет отдельным сообщением QR-код и ссылку подписки:
+// его удобно переслать человеку.
+func (b *Bot) sendSubscription(ctx context.Context, bot *telegram.Bot, s TelegramSettings, u store.User) {
+	link := b.d.SubBase + u.SubToken
+	caption := "🔗 Подписка «" + esc(u.Name) + "»\n<code>" + esc(link) + "</code>\n\nОдна ссылка для v2RayTun, Hiddify, FlClash и других: формат выберется сам."
+	if png, err := qrPNG(link); err == nil {
+		if _, err := bot.SendPhoto(ctx, s.ChatID, png, caption, nil); err == nil {
+			return
+		}
+	}
+	bot.Send(ctx, s.ChatID, caption)
+}
+
+func (b *Bot) checkWarp(ctx context.Context) string {
+	if b.d.Routing == nil {
+		return "WARP здесь недоступен"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	through, _, err := b.d.Routing.CheckWarp(ctx)
+	if err != nil {
+		return "WARP не отвечает: " + err.Error()
+	}
+	if through.Warp == "on" || through.Warp == "plus" {
+		return "WARP работает, выход " + through.IP
+	}
+	return "Через WARP не пошло (warp=" + through.Warp + ")"
+}
+
 func inputOf(u store.User) UserInput {
 	return UserInput{
 		Name: u.Name, Note: u.Note, Enabled: u.Enabled, TrafficLimit: u.TrafficLimit, ResetPeriod: u.ResetPeriod,
@@ -195,191 +373,3 @@ func inputOf(u store.User) UserInput {
 }
 
 func btn(text, data string) telegram.Button { return telegram.Button{Text: text, Data: data} }
-
-// screen renders the menu for callback data.
-func (b *Bot) screen(ctx context.Context, data string) (string, telegram.Keyboard) {
-	parts := strings.Split(data, ":")
-	arg := ""
-	if len(parts) > 1 {
-		arg = parts[1]
-	}
-	switch parts[0] {
-	case "u":
-		page, _ := strconv.Atoi(arg)
-		return b.usersScreen(ctx, page)
-	case "c":
-		id, _ := strconv.ParseInt(arg, 10, 64)
-		return b.userScreen(ctx, id)
-	case "rc":
-		return "Перезапустить все ядра? Подключения на пару секунд оборвутся.",
-			telegram.Keyboard{{btn("Да, перезапустить", "rc!"), btn("Отмена", "m")}}
-	case "rb":
-		return "Перезагрузить VPS? Панель и VPN будут недоступны около минуты.",
-			telegram.Keyboard{{btn("Да, перезагрузить", "rb!"), btn("Отмена", "m")}}
-	}
-	return b.mainScreen(ctx)
-}
-
-func (b *Bot) mainScreen(ctx context.Context) (string, telegram.Keyboard) {
-	var sb strings.Builder
-	sb.WriteString("🖥 Сервер " + b.d.Notifier.host + "\n")
-	if b.d.Agent != nil {
-		h := b.d.Agent.Health(ctx)
-		sys := h.System
-		fmt.Fprintf(&sb, "Нагрузка %.2f · ОЗУ %s из %s · работает %s\n",
-			sys.Load1, gib(int64(sys.MemTotal-sys.MemAvailable)), gib(int64(sys.MemTotal)), uptime(sys.UptimeSeconds))
-		if sys.NetIface != "" {
-			fmt.Fprintf(&sb, "Сеть: ↓ %s/с · ↑ %s/с\n", rate(sys.NetRxBps), rate(sys.NetTxBps))
-		}
-		for _, c := range h.Cores {
-			if !c.Installed {
-				continue
-			}
-			mark := "⚪"
-			switch {
-			case c.Running:
-				mark = "🟢"
-			case c.Message != "":
-				mark = "🔴"
-			}
-			sb.WriteString(mark + " " + c.Name + "\n")
-		}
-	}
-	if list, err := b.d.Users.List(ctx); err == nil {
-		active := 0
-		for _, u := range list {
-			if StatusOf(u, b.d.Users.Now()) == StatusActive {
-				active++
-			}
-		}
-		fmt.Fprintf(&sb, "👥 Сейчас подключены: %s\n", b.onlineNames(ctx, list))
-		fmt.Fprintf(&sb, "Учёток: %d, из них с действующим доступом %d", len(list), active)
-	}
-	kb := telegram.Keyboard{
-		{btn("👥 Пользователи", "u:0"), btn("🔄 Обновить", "m")},
-		{btn("⚙️ Перезапустить ядра", "rc"), btn("🗄 Резервная копия", "bk")},
-		{btn("♻️ Перезагрузить VPS", "rb")},
-	}
-	return sb.String(), kb
-}
-
-var statusMark = map[Status]string{StatusActive: "🟢", StatusDisabled: "⚪", StatusExpired: "⌛", StatusLimited: "⛔"}
-
-func (b *Bot) usersScreen(ctx context.Context, page int) (string, telegram.Keyboard) {
-	list, err := b.d.Users.List(ctx)
-	if err != nil {
-		return "Не удалось прочитать пользователей: " + err.Error(), telegram.Keyboard{{btn("← Назад", "m")}}
-	}
-	if len(list) == 0 {
-		return "Пользователей пока нет — добавьте их в панели.", telegram.Keyboard{{btn("← Назад", "m")}}
-	}
-	pages := (len(list) + usersPerPage - 1) / usersPerPage
-	page = max(0, min(page, pages-1))
-	var kb telegram.Keyboard
-	for _, u := range list[page*usersPerPage : min(len(list), (page+1)*usersPerPage)] {
-		kb = append(kb, []telegram.Button{btn(statusMark[StatusOf(u, b.d.Users.Now())]+" "+u.Name+" · "+gib(u.TrafficUsed), "c:"+strconv.FormatInt(u.ID, 10))})
-	}
-	var nav []telegram.Button
-	if page > 0 {
-		nav = append(nav, btn("‹", "u:"+strconv.Itoa(page-1)))
-	}
-	nav = append(nav, btn("← Меню", "m"))
-	if page < pages-1 {
-		nav = append(nav, btn("›", "u:"+strconv.Itoa(page+1)))
-	}
-	kb = append(kb, nav)
-	return fmt.Sprintf("👥 Пользователи (%d), страница %d из %d", len(list), page+1, pages), kb
-}
-
-func (b *Bot) userScreen(ctx context.Context, id int64) (string, telegram.Keyboard) {
-	u, err := b.d.Users.Get(ctx, id)
-	if err != nil {
-		return "Пользователь не найден.", telegram.Keyboard{{btn("← Назад", "u:0")}}
-	}
-	st := StatusOf(u, b.d.Users.Now())
-	names := map[Status]string{StatusActive: "активен", StatusDisabled: "выключен", StatusExpired: "срок истёк", StatusLimited: "трафик закончился"}
-	var sb strings.Builder
-	sb.WriteString(statusMark[st] + " " + u.Name + " — " + names[st] + "\n")
-	if u.Note != "" {
-		sb.WriteString(u.Note + "\n")
-	}
-	limit := "без лимита"
-	if u.TrafficLimit > 0 {
-		limit = "из " + gib(u.TrafficLimit)
-	}
-	sb.WriteString("Трафик: " + gib(u.TrafficUsed) + " " + limit + "\n")
-	if u.ExpireAt != nil {
-		sb.WriteString("Доступ до " + u.ExpireAt.Local().Format("02.01.2006"))
-	} else {
-		sb.WriteString("Срок не ограничен")
-	}
-	sid := strconv.FormatInt(u.ID, 10)
-	toggle := "⏸ Выключить"
-	if !u.Enabled {
-		toggle = "▶️ Включить"
-	}
-	kb := telegram.Keyboard{}
-	if u.ExpireAt != nil {
-		kb = append(kb, []telegram.Button{btn("+7 дней", "x:"+sid+":7"), btn("+30 дней", "x:"+sid+":30"), btn("+90 дней", "x:"+sid+":90")})
-	}
-	kb = append(kb,
-		[]telegram.Button{btn("↺ Сбросить трафик", "r:"+sid), btn(toggle, "t:"+sid)},
-		[]telegram.Button{btn("🔗 Ссылка подписки", "s:"+sid)},
-		[]telegram.Button{btn("← К списку", "u:0"), btn("Меню", "m")},
-	)
-	return sb.String(), kb
-}
-
-func gib(b int64) string {
-	switch {
-	case b >= 1<<30:
-		return fmt.Sprintf("%.2f ГБ", float64(b)/(1<<30))
-	case b >= 1<<20:
-		return fmt.Sprintf("%.0f МБ", float64(b)/(1<<20))
-	default:
-		return fmt.Sprintf("%d КБ", b>>10)
-	}
-}
-
-func rate(bps float64) string {
-	if bps >= 1<<20 {
-		return fmt.Sprintf("%.1f МБ", bps/(1<<20))
-	}
-	return fmt.Sprintf("%.0f КБ", bps/(1<<10))
-}
-
-func uptime(s int64) string {
-	d := time.Duration(s) * time.Second
-	if days := int(d.Hours()) / 24; days > 0 {
-		return fmt.Sprintf("%d дн. %d ч", days, int(d.Hours())%24)
-	}
-	return fmt.Sprintf("%d ч %d мин", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// onlineNames lists who is connected right now, as the panel's online
-// marks do.
-func (b *Bot) onlineNames(ctx context.Context, list []store.User) string {
-	if b.d.Agent == nil {
-		return "—"
-	}
-	m, _ := b.d.Agent.Online(ctx)
-	m = MergeOnline(m, b.d.Nodes)
-	names := map[int64]string{}
-	for _, u := range list {
-		names[u.ID] = u.Name
-	}
-	var on []string
-	for email, e := range m {
-		if e.Connections == 0 && len(e.IPs) == 0 {
-			continue
-		}
-		if id, ok := compile.UserIDFromEmail(email); ok && names[id] != "" {
-			on = append(on, names[id])
-		}
-	}
-	if len(on) == 0 {
-		return "никого"
-	}
-	slices.Sort(on)
-	return fmt.Sprintf("%d (%s)", len(on), strings.Join(on, ", "))
-}

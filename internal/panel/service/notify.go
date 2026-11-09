@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -122,7 +123,7 @@ func (n *Notifier) FindChat(ctx context.Context, token string) (*telegram.Chat, 
 func (n *Notifier) ready(s TelegramSettings) bool { return s.Token != "" && s.ChatID != 0 }
 
 func (n *Notifier) send(ctx context.Context, s TelegramSettings, text string) error {
-	return telegram.New(s.Token).Send(ctx, s.ChatID, "MultiProtocol · "+n.host+"\n"+text)
+	return telegram.New(s.Token).Send(ctx, s.ChatID, "<b>"+esc(n.host)+"</b>\n"+esc(text))
 }
 
 // Test sends a test message.
@@ -158,9 +159,36 @@ func (n *Notifier) onEvent(e store.Event) {
 			name = u.Name
 		}
 	}
-	if err := n.send(ctx, s, eventText(e, name)); err != nil {
+	text := "<b>" + esc(n.host) + "</b>\n" + esc(eventText(e, name))
+	var err error
+	if kb := eventButtons(e); kb != nil && s.Control {
+		_, err = telegram.New(s.Token).SendMenu(ctx, s.ChatID, text, kb)
+	} else {
+		err = telegram.New(s.Token).Send(ctx, s.ChatID, text)
+	}
+	if err != nil {
 		n.log.Warn("telegram notification", "err", err)
 	}
+}
+
+// eventButtons — кнопки под уведомлением, чтобы сразу отреагировать
+// (работают, когда включено управление через бота).
+func eventButtons(e store.Event) telegram.Keyboard {
+	nb := func(text, data string) telegram.Button { return btn(text, notifyPrefix+data) }
+	uid := strconv.FormatInt(e.UserID, 10)
+	switch e.Type {
+	case EventUserLimited:
+		return telegram.Keyboard{{nb("↺ Сбросить трафик", "r:"+uid), nb("📦 Лимит", "l:"+uid)}, {nb("Открыть", "c:"+uid)}}
+	case EventUserExpired:
+		return telegram.Keyboard{{nb("+30 дней", "x:"+uid+":30"), nb("+90 дней", "x:"+uid+":90")}, {nb("Открыть", "c:"+uid)}}
+	case EventCoreDown, EventCoresRollback:
+		return telegram.Keyboard{{nb("⚙️ Перезапустить ядра", "rc"), nb("🛠 Обслуживание", "mt")}}
+	case EventWarpRestarted:
+		return telegram.Keyboard{{nb("🌐 Проверить WARP", "wc")}}
+	case EventNodeDown, EventBillingDue:
+		return telegram.Keyboard{{nb("🌍 Серверы", "sv")}}
+	}
+	return nil
 }
 
 func str(d map[string]any, k string) string {

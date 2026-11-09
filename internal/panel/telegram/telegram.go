@@ -59,9 +59,10 @@ func (b *Bot) do(req *http.Request, out any) error {
 	return nil
 }
 
-// Send posts a plain-text message.
+// Send posts a message. Текст — HTML Telegram (<b>, <i>, <code>, <pre>,
+// <blockquote>): всё пришедшее извне экранируйте html.EscapeString.
 func (b *Bot) Send(ctx context.Context, chat int64, text string) error {
-	body, _ := json.Marshal(map[string]any{"chat_id": chat, "text": text, "disable_web_page_preview": true})
+	body, _ := json.Marshal(map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, b.url("sendMessage"), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return b.do(req, nil)
@@ -145,7 +146,7 @@ func (b *Bot) SendMenu(ctx context.Context, chat int64, text string, kb Keyboard
 		ID int64 `json:"message_id"`
 	}
 	err := b.post(ctx, "sendMessage", map[string]any{
-		"chat_id": chat, "text": text, "disable_web_page_preview": true, "reply_markup": markup(kb),
+		"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": markup(kb),
 	}, &msg)
 	return msg.ID, err
 }
@@ -153,12 +154,46 @@ func (b *Bot) SendMenu(ctx context.Context, chat int64, text string, kb Keyboard
 // EditMenu replaces the text and buttons of a message in place.
 func (b *Bot) EditMenu(ctx context.Context, chat, msgID int64, text string, kb Keyboard) error {
 	err := b.post(ctx, "editMessageText", map[string]any{
-		"chat_id": chat, "message_id": msgID, "text": text, "disable_web_page_preview": true, "reply_markup": markup(kb),
+		"chat_id": chat, "message_id": msgID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": markup(kb),
 	}, nil)
 	if err != nil && strings.Contains(err.Error(), "message is not modified") {
 		return nil
 	}
 	return err
+}
+
+// SendPhoto отправляет картинку PNG с подписью (HTML) и кнопками.
+func (b *Bot) SendPhoto(ctx context.Context, chat int64, png []byte, caption string, kb Keyboard) (int64, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	w.WriteField("caption", caption)
+	w.WriteField("parse_mode", "HTML")
+	if kb != nil {
+		m, _ := json.Marshal(markup(kb))
+		w.WriteField("reply_markup", string(m))
+	}
+	fw, _ := w.CreateFormFile("photo", "image.png")
+	fw.Write(png)
+	w.Close()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, b.url("sendPhoto"), &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	var msg struct {
+		ID int64 `json:"message_id"`
+	}
+	err := b.do(req, &msg)
+	return msg.ID, err
+}
+
+// Command — пункт меню команд бота (кнопка «Меню» рядом с полем ввода).
+type Command struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// SetCommands задаёт меню команд бота.
+func (b *Bot) SetCommands(ctx context.Context, cmds []Command) error {
+	return b.post(ctx, "setMyCommands", map[string]any{"commands": cmds}, nil)
 }
 
 // Answer acknowledges a button press; text, when set, shows as a toast.
