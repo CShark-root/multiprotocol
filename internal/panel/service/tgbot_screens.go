@@ -59,7 +59,7 @@ func (b *Bot) screen(ctx context.Context, data string) (string, telegram.Keyboar
 		return "Удалить <b>" + esc(u.Name) + "</b>? Подписка перестанет работать, а его трафик останется в общей статистике. Это не отменить.",
 			telegram.Keyboard{{btn("🗑 Да, удалить", "d!:"+arg(1)), btn("Отмена", "c:"+arg(1))}}
 	case "nw":
-		return "➕ <b>Новый пользователь</b>\n\nНапишите имя: буквы, цифры и _ . - без пробелов. Например, «Мама» или «Дима_ноутбук».", telegram.Keyboard{{btn("Отмена", "nx")}}
+		return "➕ <b>Новый пользователь</b>\n\nНапишите имя: буквы, цифры и _ . - без пробелов.", telegram.Keyboard{{btn("Отмена", "nx")}}
 	case "nl":
 		if b.wiz == nil {
 			return b.mainScreen(ctx)

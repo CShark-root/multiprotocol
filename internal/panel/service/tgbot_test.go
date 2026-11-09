@@ -42,7 +42,7 @@ func TestBotScreens(t *testing.T) {
 	ev := NewEvents(st)
 	users := NewUsers(st, nil)
 	exp := time.Now().AddDate(0, 0, 2)
-	u, err := users.Create(ctx, 0, UserInput{Name: "Аня", Note: "дочь <&>", Enabled: true, TrafficLimit: 10 << 30, ResetPeriod: "month", ExpireAt: &exp})
+	u, err := users.Create(ctx, 0, UserInput{Name: "user1", Note: "заметка <&>", Enabled: true, TrafficLimit: 10 << 30, ResetPeriod: "month", ExpireAt: &exp})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,19 +63,19 @@ func TestBotScreens(t *testing.T) {
 			}
 		}
 	}
-	if text, _ := b.screen(ctx, "m"); !strings.Contains(text, "Аня: доступ кончится через 2 дня") {
+	if text, _ := b.screen(ctx, "m"); !strings.Contains(text, "user1: доступ кончится через 2 дня") {
 		t.Fatalf("main screen must warn about the expiry:\n%s", text)
 	}
-	if text, _ := b.screen(ctx, "c:"+id); !strings.Contains(text, "▰▰▰▰▰▰▰▰▰") || !strings.Contains(text, "дочь &lt;&amp;&gt;") {
+	if text, _ := b.screen(ctx, "c:"+id); !strings.Contains(text, "▰▰▰▰▰▰▰▰▰") || !strings.Contains(text, "заметка &lt;&amp;&gt;") {
 		t.Fatalf("card must show the traffic bar:\n%s", text)
 	}
 
 	// Мастер: имя текстом → лимит → срок.
 	b.onText(ctx, "/new")
-	if text, _ := b.onText(ctx, "Дима ноутбук"); !strings.Contains(text, "без пробелов") {
+	if text, _ := b.onText(ctx, "user two"); !strings.Contains(text, "без пробелов") {
 		t.Fatalf("a name with a space must be asked again:\n%s", text)
 	}
-	text, _ := b.onText(ctx, "Мама")
+	text, _ := b.onText(ctx, "user2")
 	htmlOK(t, "nl", text)
 	data := "nl:50"
 	b.act(ctx, telegram.New("1:x"), TelegramSettings{}, &data)
@@ -83,7 +83,7 @@ func TestBotScreens(t *testing.T) {
 		t.Fatalf("limit step: %q %+v", data, b.wiz)
 	}
 	// Поиск по части имени открывает карточку.
-	if text, _ := b.onText(ctx, "аня"); !strings.Contains(text, "Трафик") {
+	if text, _ := b.onText(ctx, "USER1"); !strings.Contains(text, "Трафик") {
 		t.Fatalf("search must open the card:\n%s", text)
 	}
 }
