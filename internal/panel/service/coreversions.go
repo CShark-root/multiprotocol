@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,38 +85,66 @@ func releases(ctx context.Context, repo, prefix string) ([]CoreVersion, error) {
 	if time.Since(c.at[repo]) < time.Hour && c.list[repo] != nil {
 		return c.list[repo], nil
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+repo+"/releases?per_page=30", nil)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(repo + ": HTTP " + resp.Status)
-	}
-	var raw []struct {
-		Tag        string    `json:"tag_name"`
-		Prerelease bool      `json:"prerelease"`
-		Draft      bool      `json:"draft"`
-		Published  time.Time `json:"published_at"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&raw); err != nil {
-		return nil, err
-	}
+	// У sing-box на странице десятки альф с сотней файлов каждая: ответ
+	// весит больше 10 МБ. Читаем его потоком и листаем, пока не наберём
+	// стабильные версии.
 	var out []CoreVersion
-	for _, r := range raw {
-		v, ok := strings.CutPrefix(r.Tag, prefix)
-		if r.Prerelease || r.Draft || !ok || !versionRe.MatchString(v) {
-			continue
+	for page := 1; page <= 3 && len(out) < 10; page++ {
+		more, err := releasesPage(ctx, repo, prefix, page, &out)
+		if err != nil {
+			if len(out) > 0 {
+				break // что успели прочитать — уже годится
+			}
+			return nil, err
 		}
-		out = append(out, CoreVersion{Version: v, Published: r.Published})
-		if len(out) == 10 {
+		if !more {
 			break
 		}
 	}
 	c.at[repo], c.list[repo] = time.Now(), out
 	return out, nil
+}
+
+// releasesPage дописывает в out стабильные версии с одной страницы релизов;
+// more — есть ли смысл просить следующую.
+func releasesPage(ctx context.Context, repo, prefix string, page int, out *[]CoreVersion) (more bool, err error) {
+	url := "https://api.github.com/repos/" + repo + "/releases?per_page=30&page=" + strconv.Itoa(page)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, errors.New(repo + ": HTTP " + resp.Status)
+	}
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 64<<20))
+	if _, err := dec.Token(); err != nil { // открывающая скобка массива
+		return false, err
+	}
+	n := 0
+	for dec.More() {
+		var r struct {
+			Tag        string    `json:"tag_name"`
+			Prerelease bool      `json:"prerelease"`
+			Draft      bool      `json:"draft"`
+			Published  time.Time `json:"published_at"`
+		}
+		if err := dec.Decode(&r); err != nil {
+			return false, err
+		}
+		n++
+		v, ok := strings.CutPrefix(r.Tag, prefix)
+		if r.Prerelease || r.Draft || !ok || !versionRe.MatchString(v) {
+			continue
+		}
+		*out = append(*out, CoreVersion{Version: v, Published: r.Published})
+		if len(*out) == 10 {
+			return false, nil
+		}
+	}
+	return n == 30, nil
 }
 
 // Versions — ядра этого сервера с доступными версиями.
