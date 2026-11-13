@@ -68,13 +68,21 @@ type docker struct {
 	http *http.Client
 }
 
+// newDocker — клиент Docker на каждый вызов, но без постоянных соединений:
+// раньше у каждого клиента оставался свой пул соединений, их никто не
+// закрывал, и за несколько дней набирались тысячи открытых сокетов у
+// помощника и у dockerd (а с ними и нагрузка на процессор). Соединение
+// по unix-сокету почти бесплатное, держать его незачем.
 func newDocker(socket string) *docker {
 	return &docker{http: &http.Client{
 		Timeout: 20 * time.Second,
-		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
-		}},
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socket)
+			},
+		},
 	}}
 }
 
