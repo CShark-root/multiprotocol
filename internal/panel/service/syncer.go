@@ -62,6 +62,7 @@ func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr str
 	return &Syncer{
 		store: st, agent: ag, events: events, apiAddr: xrayAPIAddr, log: log, now: time.Now,
 		trigger: make(chan struct{}, 1), coreDown: map[string]bool{},
+		amneziaPaused: map[string]string{}, amneziaStarted: map[string]time.Time{},
 	}
 }
 

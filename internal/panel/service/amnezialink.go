@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"panel/internal/amnezia"
 	"panel/internal/panel/store"
@@ -116,6 +117,10 @@ func (s *Syncer) applyAmnezia(ctx context.Context, statuses map[int64]Status) {
 		if st, ok := statuses[l.UserID]; ok && st != StatusActive {
 			paused[l.Container] = append(paused[l.Container], l.Key)
 		}
+	}
+	if s.amneziaPaused == nil { // Syncer мог собраться не через NewSyncer
+		s.amneziaPaused = map[string]string{}
+		s.amneziaStarted = map[string]time.Time{}
 	}
 	for _, c := range s.amneziaSeen.Containers {
 		if !c.Managed || c.State != "running" {
