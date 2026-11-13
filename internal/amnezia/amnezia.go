@@ -369,7 +369,8 @@ func parseDump(out string) []Client {
 }
 
 // Logs returns the last lines a container printed. Many Amnezia containers
-// run with logging off; then there is nothing to show.
+// run with logging off: Docker then answers the logs endpoint with
+// "501 not implemented", which means "nothing to show", not an error.
 func Logs(ctx context.Context, socket, name string, tail int) ([]string, error) {
 	d := newDocker(socket)
 	list, err := d.list(ctx)
@@ -386,9 +387,15 @@ func Logs(ctx context.Context, socket, name string, tail int) ([]string, error) 
 		return nil, errors.New("no such Amnezia container")
 	}
 	q := url.Values{"stdout": {"1"}, "stderr": {"1"}, "timestamps": {"1"}, "tail": {strconv.Itoa(tail)}}
-	raw, err := d.do(ctx, http.MethodGet, "/containers/"+id+"/logs?"+q.Encode(), nil, nil)
+	raw, code, err := d.raw(ctx, http.MethodGet, "/containers/"+id+"/logs?"+q.Encode(), "", nil)
 	if err != nil {
 		return nil, err
+	}
+	if code == http.StatusNotImplemented {
+		return []string{}, nil
+	}
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("docker GET /containers/…/logs: HTTP %d", code)
 	}
 	return demux(raw), nil
 }
