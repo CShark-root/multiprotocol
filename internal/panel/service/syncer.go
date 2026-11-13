@@ -46,8 +46,16 @@ type Syncer struct {
 	amnezia     AmneziaClients         // nil: без связки с Amnezia
 	amneziaSeen *amnezia.Status        // что помощник показал в этом круге
 	amneziaFree map[[2]string][2]int64 // прошлые счётчики непривязанных клиентов AmneziaWG
-	nodes       *Nodes                 // nil: только этот сервер
-	mainHost    string                 // адрес главного сервера для каскадов
+
+	// Чтобы не гонять docker exec каждую минуту: SetPaused вызываем, только
+	// когда набор выключенных ключей контейнера изменился, контейнер
+	// перезапустился или прошлый вызов не удался. Перезапуск меняет StartedAt,
+	// и подпись сбрасывается — самолечение после рестарта сохраняется.
+	amneziaPaused  map[string]string    // container → signature Keys последнего удачного SetPaused
+	amneziaStarted map[string]time.Time // container → StartedAt из последнего круга
+
+	nodes    *Nodes // nil: только этот сервер
+	mainHost string // адрес главного сервера для каскадов
 }
 
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {

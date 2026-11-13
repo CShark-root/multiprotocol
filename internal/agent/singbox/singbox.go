@@ -31,8 +31,10 @@ import (
 	"panel/internal/agent/core"
 )
 
-// The Clash API is on loopback and the list is small, so polling every
-// second is cheap and keeps the uncounted tail short.
+// The Clash API is on loopback and the list is small. While connections are
+// open the poll is every second to keep the uncounted tail short; after ~10
+// empty polls it relaxes to 5 seconds so sing-box does not marshal the whole
+// (empty) connection list every second in idle.
 const pollInterval = time.Second
 
 // userFromChains finds the per-user outbound ("direct-u7", "warp-u7"; see
@@ -152,17 +154,31 @@ func (a *Adapter) Health(ctx context.Context) agent.HealthStatus {
 var client = &http.Client{Timeout: 5 * time.Second}
 
 func (a *Adapter) poll() {
-	t := time.NewTicker(pollInterval)
-	defer t.Stop()
-	for range t.C {
+	interval := pollInterval
+	idle := 0 // подряд опросов без соединений
+	for {
+		timer := time.NewTimer(interval)
+		<-timer.C
 		if !a.runner.Running() {
 			a.statsMu.Lock()
 			a.conns = map[string]connState{}
 			a.statsMu.Unlock()
 			continue
 		}
-		if err := a.pollOnce(); err != nil {
+		n, err := a.pollOnce()
+		if err != nil {
 			a.log.Debug("clash api poll", "err", err)
+			continue
+		}
+		if n > 0 {
+			idle = 0
+			interval = pollInterval
+		} else if idle < 10 {
+			idle++
+		} else {
+			// В простое sing-box не должен каждую секунду
+			// маршалить весь список соединений ради пустого ответа.
+			interval = 5 * pollInterval
 		}
 	}
 }
@@ -181,7 +197,8 @@ type connEntry struct {
 	} `json:"metadata"`
 }
 
-func (a *Adapter) pollOnce() error {
+// pollOnce returns the number of live connections sing-box reported.
+func (a *Adapter) pollOnce() (int, error) {
 	a.mu.Lock()
 	addr, secret := a.clashAddr, a.secret
 	a.mu.Unlock()
@@ -190,18 +207,18 @@ func (a *Adapter) pollOnce() error {
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	var c connections
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&c); err != nil {
-		return err
+		return 0, err
 	}
 	a.account(c)
-	return nil
+	return len(c.Connections), nil
 }
 
 // account turns cumulative per-connection counters into per-user deltas.

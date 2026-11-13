@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"panel/internal/amnezia"
 	"panel/internal/panel/store"
@@ -123,8 +125,20 @@ func (s *Syncer) applyAmnezia(ctx context.Context, statuses map[int64]Status) {
 		if keys == nil {
 			keys = []string{}
 		}
+		// Без изменений в наборе ключей и без рестарта контейнера
+		// SetPaused не нужен: он всё равно ничего бы не сделал, а стоит
+		// несколько запросов к Docker. Ручное удаление пира с интерфейса
+		// теперь не поднимет его до перезапуска контейнера — это осознанный
+		// обмен: docker exec каждую минуту на каждый контейнер дороже.
+		sig := strings.Join(slices.Sorted(slices.Values(keys)), "\x00")
+		if s.amneziaPaused[c.Name] == sig && s.amneziaStarted[c.Name].Equal(c.StartedAt) {
+			continue
+		}
 		if _, err := s.amnezia.SetPaused(ctx, amnezia.PauseParams{Container: c.Name, Keys: keys}); err != nil {
 			s.log.Warn("amnezia paused clients", "container", c.Name, "err", err)
+			continue
 		}
+		s.amneziaPaused[c.Name] = sig
+		s.amneziaStarted[c.Name] = c.StartedAt
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"panel/internal/agent"
@@ -134,6 +135,16 @@ type Agent struct {
 	applyErr string
 	pending  []agent.TrafficDelta
 	files    map[string]string // что панель велела держать (путь → sha256)
+
+	sumMu sync.Mutex
+	sums  map[string]cachedSum // кэш sha256 гео-файлов: не перечитывать десятки мегабайт каждый цикл sync
+}
+
+// cachedSum — sha256 файла и признаки, по которым видно, что он не менялся.
+type cachedSum struct {
+	size int64
+	mod  time.Time
+	sum  string
 }
 
 // New готовит агента. cores — ядра узла, собранные как у панели.
@@ -142,7 +153,7 @@ func New(dataDir string, cfg Config, cores *agent.Agent, log *slog.Logger) (*Age
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{dataDir: dataDir, cfg: cfg, agent: cores, client: cl, log: log, files: map[string]string{}}, nil
+	return &Agent{dataDir: dataDir, cfg: cfg, agent: cores, client: cl, log: log, files: map[string]string{}, sums: map[string]cachedSum{}}, nil
 }
 
 // PickXrayAPI выбирает свободный порт для API Xray и запоминает его.
@@ -260,12 +271,36 @@ func (a *Agent) localSums() map[string]string {
 	out := map[string]string{}
 	for rel := range a.files {
 		if safeRel(rel) {
-			if s := fileSHA(a.abs(rel)); s != "" {
+			if s := a.cachedFileSum(a.abs(rel)); s != "" {
 				out[rel] = s
 			}
 		}
 	}
 	return out
+}
+
+// cachedFileSum возвращает sha256 файла, перечитывая его только когда
+// изменились размер или mtime: гео-базы весят десятки мегабайт, а
+// localSums вызывается на каждом цикле sync (~раз в 25 с).
+func (a *Agent) cachedFileSum(p string) string {
+	st, err := os.Stat(p)
+	if err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	a.sumMu.Lock()
+	c, ok := a.sums[p]
+	a.sumMu.Unlock()
+	if ok && c.size == st.Size() && c.mod.Equal(st.ModTime()) {
+		return c.sum
+	}
+	sum := fileSHA(p)
+	if sum == "" {
+		return ""
+	}
+	a.sumMu.Lock()
+	a.sums[p] = cachedSum{size: st.Size(), mod: st.ModTime(), sum: sum}
+	a.sumMu.Unlock()
+	return sum
 }
 
 func (a *Agent) download(ctx context.Context, rel, want string) error {
