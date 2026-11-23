@@ -42,6 +42,9 @@ func (s *server) userLinks(w http.ResponseWriter, r *http.Request) {
 	inbounds = s.Store.WithNodeHosts(r.Context(), inbounds)
 	links := []linkDTO{}
 	for _, ib := range inbounds {
+		if ib.Protocol == "hysteria2" && u.QuotaExceeded() && u.QuotaAction == "throttle" {
+			continue
+		}
 		if ib.Enabled {
 			links = append(links, linkDTO{
 				InboundID: ib.ID, Remark: ib.Remark, Protocol: ib.Protocol, Transport: ib.Transport,
@@ -131,6 +134,9 @@ func NewSubscription(d SubscriptionDeps) http.Handler {
 		all = d.Store.WithNodeHosts(r.Context(), all)
 		inbounds := all[:0]
 		for _, ib := range all {
+			if ib.Protocol == "hysteria2" && u.QuotaExceeded() && u.QuotaAction == "throttle" {
+				continue
+			}
 			if u.InSubscription(ib.ID) {
 				inbounds = append(inbounds, ib)
 			}

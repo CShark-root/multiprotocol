@@ -24,9 +24,13 @@ func (s *Store) AddAudit(ctx context.Context, e AuditEntry, now time.Time) error
 		}
 		diff = b
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO audit_log
+	encrypted, err := s.cipher.encrypt("audit diff", string(diff))
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO audit_log
 		(ts, admin_id, action, target_type, target_id, diff_json) VALUES (?, ?, ?, ?, ?, ?)`,
 		now.Unix(), sql.NullInt64{Int64: e.AdminID, Valid: e.AdminID != 0},
-		e.Action, e.TargetType, e.TargetID, string(diff))
+		e.Action, e.TargetType, e.TargetID, encrypted)
 	return err
 }

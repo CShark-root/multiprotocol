@@ -1,6 +1,7 @@
 // Package backup packs what is needed to bring the panel back on another
 // server: the database (users, inbounds with their keys, routing, WARP,
-// domain), panel.json (port, secret paths) and the domain certificate.
+// domain), panel.json (port, secret paths), the database encryption key and
+// the domain certificate.
 // Cores, geo databases and the self-signed panel certificate are not
 // included: the installer and the panel recreate them.
 package backup
@@ -21,7 +22,7 @@ import (
 )
 
 // Files besides the database, relative to the data dir.
-var extra = []string{"panel.json", "tls/acme/cert.pem", "tls/acme/key.pem", "tls/acme/account.key"}
+var extra = []string{"panel.json", "master.key", "tls/acme/cert.pem", "tls/acme/key.pem", "tls/acme/account.key"}
 
 const dbName = "panel.db"
 

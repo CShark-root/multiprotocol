@@ -47,6 +47,7 @@ export type AuthState = { setupRequired: boolean; authenticated: boolean; admin?
 
 export type UserStatus = 'active' | 'disabled' | 'expired' | 'limited'
 export type ResetPeriod = 'none' | 'day' | 'week' | 'month'
+export type QuotaAction = 'block' | 'throttle'
 
 export type User = {
   id: number
@@ -56,6 +57,9 @@ export type User = {
   status: UserStatus
   trafficLimit: number
   trafficUsed: number
+  speedLimitMbps: number
+  quotaAction: QuotaAction
+  throttledSpeedMbps: number
   resetPeriod: ResetPeriod
   expireAt: string | null
   subToken: string
@@ -70,6 +74,9 @@ export type UserInput = {
   note: string
   enabled: boolean
   trafficLimit: number
+  speedLimitMbps: number
+  quotaAction: QuotaAction
+  throttledSpeedMbps: number
   resetPeriod: ResetPeriod
   expireAt: string | null
   amneziaKey: string

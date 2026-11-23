@@ -31,7 +31,7 @@ func TestRoundTrip(t *testing.T) {
 	dst := t.TempDir()
 	os.WriteFile(filepath.Join(dst, "panel.json"), []byte("old"), 0o600)
 	got, err := Restore(bytes.NewReader(buf.Bytes()), dst)
-	if err != nil || len(got) != 2 {
+	if err != nil || len(got) != 3 {
 		t.Fatalf("restored %v, %v", got, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dst, "panel.json.before-restore")); string(b) != "old" {

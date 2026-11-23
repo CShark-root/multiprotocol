@@ -65,6 +65,11 @@ func SingBox(inbounds []store.Inbound, users []store.User, rt Routing) ([]byte, 
 					o["username"], o["password"] = c.Bridge.User, c.Bridge.Password
 				}
 			}
+			if o["type"] == "direct" {
+				if mark := SpeedMark(u.ID); u.EffectiveSpeedMbps() > 0 && mark != 0 {
+					o["routing_mark"] = mark
+				}
+			}
 			outbounds = append(outbounds, o)
 		}
 	}

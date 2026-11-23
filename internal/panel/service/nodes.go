@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/nethelper"
 	"panel/internal/nodeproto"
 	"panel/internal/panel/store"
 	"panel/internal/panel/validate"
@@ -38,6 +39,7 @@ const nodeOffline = 2 * time.Minute
 type nodeState struct {
 	hash    string
 	configs map[string][]byte
+	limits  []nethelper.SpeedLimit
 	files   map[string]string // путь относительно dataDir → sha256
 	ready   bool              // желаемое состояние уже собрано
 
@@ -167,7 +169,7 @@ func (n *Nodes) Authenticate(ctx context.Context, token string) (store.Node, err
 
 // SetDesired задаёт состояние узла: конфиги ядер и файлы (абсолютные пути
 // внутри dataDir), которые ему нужны.
-func (n *Nodes) SetDesired(id int64, configs map[string][]byte, files []string) {
+func (n *Nodes) SetDesired(id int64, configs map[string][]byte, files []string, limits []nethelper.SpeedLimit) {
 	sums := map[string]string{}
 	for _, abs := range files {
 		rel, err := filepath.Rel(n.dataDir, abs)
@@ -187,11 +189,13 @@ func (n *Nodes) SetDesired(id int64, configs map[string][]byte, files []string) 
 	for _, k := range slices.Sorted(maps.Keys(sums)) {
 		h.Write([]byte(k + "=" + sums[k] + "\x00"))
 	}
+	encodedLimits, _ := json.Marshal(limits)
+	h.Write(encodedLimits)
 	hash := hex.EncodeToString(h.Sum(nil))[:16]
 	n.mu.Lock()
 	s := n.state(id)
 	changed := s.hash != hash
-	s.hash, s.configs, s.files, s.ready = hash, configs, sums, true
+	s.hash, s.configs, s.limits, s.files, s.ready = hash, configs, limits, sums, true
 	n.mu.Unlock()
 	if changed {
 		select {
@@ -283,6 +287,7 @@ func (n *Nodes) Sync(ctx context.Context, node store.Node, req nodeproto.SyncReq
 		resp := nodeproto.SyncResponse{Hash: s.hash, Files: maps.Clone(s.files), Commands: s.commands}
 		if ready && s.hash != req.Applied {
 			resp.Configs = s.configs
+			resp.Limits = slices.Clone(s.limits)
 		}
 		filesMissing := false
 		for k, v := range s.files {

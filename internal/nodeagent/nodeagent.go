@@ -23,11 +23,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"panel/internal/agent"
+	"panel/internal/nethelper"
 	"panel/internal/nodeproto"
 	"panel/internal/shared/version"
 )
@@ -241,6 +243,9 @@ func (a *Agent) handle(ctx context.Context, resp nodeproto.SyncResponse) {
 	}
 	if resp.Configs != nil {
 		err := a.agent.Apply(ctx, agent.NodeState{Configs: resp.Configs})
+		if runtime.GOOS == "linux" {
+			err = errors.Join(err, nethelper.NewClient(nethelper.Socket).SetSpeedLimits(ctx, resp.Limits))
+		}
 		a.applied, a.applyErr = resp.Hash, ""
 		if err != nil {
 			a.applyErr = err.Error()

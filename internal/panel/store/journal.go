@@ -212,6 +212,10 @@ func (s *Store) ListAudit(ctx context.Context, beforeID int64, limit int) ([]Aud
 		if err := rows.Scan(&r.ID, &ts, &r.Admin, &r.Action, &r.TargetType, &r.TargetID, &diff); err != nil {
 			return nil, err
 		}
+		diff, err = s.cipher.decrypt("audit diff", diff)
+		if err != nil {
+			return nil, err
+		}
 		r.TS, r.Diff = fromUnix(ts), json.RawMessage(diff)
 		out = append(out, r)
 	}

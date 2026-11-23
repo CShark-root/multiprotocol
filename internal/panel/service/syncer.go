@@ -23,16 +23,18 @@ import (
 // pushes freshly compiled configs to the agent. Applying is idempotent, so
 // an unchanged state costs nothing.
 type Syncer struct {
-	store   *store.Store
-	agent   *agent.Agent
-	events  *Events
-	apiAddr string
-	routing *Routing // nil: defaults (tests)
-	hops    HopSetter
-	hopErr  string // last port hopping error, to log each change once
-	log     *slog.Logger
-	now     func() time.Time
-	trigger chan struct{}
+	store    *store.Store
+	agent    *agent.Agent
+	events   *Events
+	apiAddr  string
+	routing  *Routing // nil: defaults (tests)
+	hops     HopSetter
+	speeds   SpeedSetter
+	hopErr   string // last port hopping error, to log each change once
+	speedErr string
+	log      *slog.Logger
+	now      func() time.Time
+	trigger  chan struct{}
 
 	mu       sync.Mutex
 	lastSync time.Time
@@ -73,6 +75,12 @@ type HopSetter interface {
 
 // SetHops gives the syncer the network helper for Hysteria port hopping.
 func (s *Syncer) SetHops(h HopSetter) { s.hops = h }
+
+type SpeedSetter interface {
+	SetSpeedLimits(ctx context.Context, limits []nethelper.SpeedLimit) error
+}
+
+func (s *Syncer) SetSpeeds(setter SpeedSetter) { s.speeds = setter }
 
 // SetRouting gives the syncer the routing settings to compile with.
 func (s *Syncer) SetRouting(r *Routing) { s.routing = r }
@@ -210,7 +218,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 	for _, u := range users {
 		st := StatusOf(u, now)
 		statuses[u.ID] = st
-		if st == StatusActive {
+		if st == StatusActive || (st == StatusLimited && u.QuotaAction == "throttle") {
 			active = append(active, u)
 		}
 	}
@@ -233,7 +241,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hyCfg, err := compile.Hysteria(inbounds, active, rt)
+	hyCfg, err := compile.Hysteria(inbounds, hysteriaUsers(active), rt)
 	if err != nil {
 		return err
 	}
@@ -245,7 +253,19 @@ func (s *Syncer) apply(ctx context.Context) error {
 		"xray": xrayCfg, "hysteria": hyCfg, "singbox": sbCfg, "sniproxy": sniCfg,
 	}})
 	s.applyHops(ctx, inbounds)
+	s.applySpeeds(ctx, active)
 	return err
+}
+
+func hysteriaUsers(users []store.User) []store.User {
+	out := users[:0:0]
+	for _, u := range users {
+		if u.QuotaExceeded() && u.QuotaAction == "throttle" {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // applyHops sends the port hopping ranges of enabled Hysteria2 inbounds to
@@ -283,6 +303,41 @@ func (s *Syncer) applyHops(ctx context.Context, inbounds []store.Inbound) {
 }
 
 const EventHopFailed = "hop.failed"
+const EventSpeedFailed = "speed.failed"
+
+func (s *Syncer) applySpeeds(ctx context.Context, users []store.User) {
+	if s.speeds == nil {
+		return
+	}
+	limits := speedLimits(users)
+	err := s.speeds.SetSpeedLimits(ctx, limits)
+	if errors.Is(err, nethelper.ErrNoHelper) && len(limits) == 0 {
+		err = nil
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	if msg == s.speedErr {
+		return
+	}
+	s.speedErr = msg
+	if msg != "" {
+		s.log.Warn("speed limits", "err", msg)
+		s.events.Add(ctx, EventSpeedFailed, "warning", 0, "", map[string]any{"error": msg})
+	}
+}
+
+func speedLimits(users []store.User) []nethelper.SpeedLimit {
+	limits := []nethelper.SpeedLimit{}
+	for _, u := range users {
+		mbps := u.EffectiveSpeedMbps()
+		if mark := compile.SpeedMark(u.ID); mbps > 0 && mark != 0 {
+			limits = append(limits, nethelper.SpeedLimit{Mark: mark, Mbps: mbps})
+		}
+	}
+	return limits
+}
 
 // SetNodes подключает другие наши серверы. Вызывать до Run.
 func (s *Syncer) SetNodes(n *Nodes) { s.nodes = n }
@@ -325,13 +380,13 @@ func (s *Syncer) applyNodes(ctx context.Context, all []store.Inbound, active []s
 		ibs, sniCfg := compile.SharePorts(onNode(all, node.ID))
 		srt := nrt.ForServer(strconv.FormatInt(node.ID, 10), node.Host, hostOf)
 		xr, err1 := compile.Xray(ibs, active, api, srt)
-		hy, err2 := compile.Hysteria(ibs, active, srt)
+		hy, err2 := compile.Hysteria(ibs, hysteriaUsers(active), srt)
 		sb, err3 := compile.SingBox(ibs, active, srt)
 		if err := errors.Join(err1, err2, err3); err != nil {
 			s.log.Warn("compile node config", "node", node.Name, "err", err)
 			continue
 		}
-		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb, "sniproxy": sniCfg}, files)
+		s.nodes.SetDesired(node.ID, map[string][]byte{"xray": xr, "hysteria": hy, "singbox": sb, "sniproxy": sniCfg}, files, speedLimits(active))
 	}
 }
 

@@ -5,7 +5,10 @@
 // настройки доходят до узла почти сразу.
 package nodeproto
 
-import "panel/internal/agent"
+import (
+	"panel/internal/agent"
+	"panel/internal/nethelper"
+)
 
 // Path — путь под секретным путём панели.
 const Path = "/node-api/v1"
@@ -30,7 +33,8 @@ type SyncRequest struct {
 type SyncResponse struct {
 	Hash string `json:"hash"`
 	// Configs — конфиги ядер; пусто, если Hash совпадает с Applied.
-	Configs map[string][]byte `json:"configs,omitempty"`
+	Configs map[string][]byte      `json:"configs,omitempty"`
+	Limits  []nethelper.SpeedLimit `json:"limits,omitempty"`
 	// Files — какие файлы должны быть у агента (гео-базы). Недостающие он
 	// скачивает GET file?path=…
 	Files    map[string]string `json:"files"`

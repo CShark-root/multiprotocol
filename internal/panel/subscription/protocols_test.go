@@ -55,6 +55,36 @@ func TestLinksForAllProtocols(t *testing.T) {
 	}
 }
 
+func TestMihomoDuplicateNames(t *testing.T) {
+	inbounds := make([]store.Inbound, 4)
+	for i := range inbounds {
+		inbounds[i] = store.Inbound{Remark: "Same", Protocol: "vless", Transport: "tcp", Port: 443 + i, Enabled: true,
+			Settings: store.InboundSettings{Reality: reality()}}
+	}
+	inbounds[2].Remark = "Same 2"
+	b, err := MihomoConfig(inbounds, user, "203.0.113.5", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Proxies []struct {
+			Name string `json:"name"`
+		} `json:"proxies"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Same", "Same 2", "Same 2 2", "Same 3"}
+	if len(cfg.Proxies) != len(want) {
+		t.Fatalf("got %d proxies, want %d", len(cfg.Proxies), len(want))
+	}
+	for i := range want {
+		if cfg.Proxies[i].Name != want[i] {
+			t.Errorf("proxy %d name = %q, want %q", i, cfg.Proxies[i].Name, want[i])
+		}
+	}
+}
+
 func TestSingBoxClientConfig(t *testing.T) {
 	ssS := &store.ShadowsocksSettings{Method: "2022-blake3-aes-128-gcm", ServerPSK: "PSK"}
 	inbounds := []store.Inbound{

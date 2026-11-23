@@ -37,11 +37,15 @@ func MihomoConfig(inbounds []store.Inbound, u store.User, host, client string) (
 		}
 		// Имена в Mihomo должны быть уникальными.
 		name := p["name"].(string)
-		if n := seen[name]; n > 0 {
-			name += " " + strconv.Itoa(n+1)
-			p["name"] = name
+		base := name
+		for n := 2; seen[name] > 0; n++ {
+			name = base + " " + strconv.Itoa(n)
 		}
-		seen[p["name"].(string)]++
+		seen[name]++
+		if name != base {
+			seen[base]++
+		}
+		p["name"] = name
 		proxies = append(proxies, p)
 		names = append(names, name)
 	}

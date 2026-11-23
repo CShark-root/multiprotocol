@@ -175,7 +175,9 @@ func serve(args []string) int {
 		routingSvc = service.NewRouting(st, events, geoDir, changed, localAgent.RestartCores, log)
 		syncer.SetRouting(routingSvc)
 		if !*dev && runtime.GOOS == "linux" {
-			syncer.SetHops(nethelper.NewClient(nethelper.Socket))
+			nh := nethelper.NewClient(nethelper.Socket)
+			syncer.SetHops(nh)
+			syncer.SetSpeeds(nh)
 		}
 		if a := amneziaClient(*dev); a != nil {
 			syncer.SetAmnezia(a)

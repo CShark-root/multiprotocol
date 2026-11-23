@@ -28,9 +28,10 @@ install -m 0755 "$SRC/panel-linux-$ARCH" /usr/local/bin/panel
 install -m 0644 "$SRC/panel.service" /etc/systemd/system/panel.service
 install -m 0644 "$SRC/panel-amnezia.service" /etc/systemd/system/panel-amnezia.service
 install -m 0644 "$SRC/panel-net.service" /etc/systemd/system/panel-net.service
-# Port hopping uses nftables (the kernel has it; this adds the nft tool).
+# Port hopping uses nftables; per-user download limits use tc. The default
 # nftables.service stays disabled: it would load /etc/nftables.conf at boot.
 command -v nft >/dev/null || apt-get install -y -qq nftables
+command -v tc >/dev/null || apt-get install -y -qq iproute2
 # Updates from the panel's own "Update" button: the panel only drops a request
 # file, systemd runs the checksum-verified installer as root.
 install -d -m 0755 /usr/local/lib/panel
@@ -120,6 +121,11 @@ fi
 # Earlier versions created the database world-readable (the directory is
 # 0700, so it was never reachable, but keep it tight anyway).
 chmod -f 600 /var/lib/panel/panel.db /var/lib/panel/panel.db-wal /var/lib/panel/panel.db-shm 2>/dev/null || true
+# Set the address before starting the panel: a second immediate restart would
+# produce misleading core-exit and closed-database errors in the journal.
+if [[ -n "${PUBLIC_HOST:-}" ]]; then
+  sudo -u panel /usr/local/bin/panel set-host -data-dir /var/lib/panel "$PUBLIC_HOST"
+fi
 echo "==> restart"
 systemctl daemon-reload
 systemctl enable panel panel-amnezia panel-net panel-update.path >/dev/null 2>&1
@@ -129,12 +135,6 @@ systemctl start panel-update.path
 systemctl restart panel-amnezia
 systemctl restart panel
 sleep 2
-# Optional: the address clients use, when auto-detection would pick the wrong one.
-if [[ -n "${PUBLIC_HOST:-}" ]]; then
-  sudo -u panel /usr/local/bin/panel set-host -data-dir /var/lib/panel "$PUBLIC_HOST"
-  systemctl restart panel
-  sleep 2
-fi
 systemctl --no-pager --lines=5 status panel || true
 echo
 sudo -u panel /usr/local/bin/panel show-url -data-dir /var/lib/panel

@@ -5,7 +5,9 @@ package compile
 
 import (
 	"encoding/json"
+	"maps"
 	"net"
+	"slices"
 	"strconv"
 
 	"panel/internal/panel/routing"
@@ -84,11 +86,31 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 		})
 		rules = append(rules, map[string]any{"inboundTag": []string{in}, "outboundTag": c.Tag})
 	}
+	limited := limitedUsers(users)
 	needIP := false
 	for _, r := range rt.Rules {
+		if r.Outbound != routing.Block {
+			for _, u := range limited {
+				email := Email(u.ID)
+				if len(r.Users) > 0 && !slices.Contains(r.Users, email) {
+					continue
+				}
+				limited := r
+				limited.Users = []string{email}
+				limited.Outbound = speedTag(outTag(r.Outbound), u.ID)
+				xr, usesIP := xrayRules(limited)
+				rules = append(rules, xr...)
+				needIP = needIP || usesIP
+			}
+		}
 		xr, usesIP := xrayRules(r)
 		rules = append(rules, xr...)
 		needIP = needIP || usesIP
+	}
+	for _, u := range limited {
+		rules = append(rules, map[string]any{
+			"user": []string{Email(u.ID)}, "outboundTag": speedTag(outTag(rt.Final), u.ID),
+		})
 	}
 	domainStrategy := "AsIs"
 	if needIP {
@@ -109,7 +131,7 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 			},
 		},
 		"inbounds":  ins,
-		"outbounds": xrayOutbounds(rt),
+		"outbounds": xrayOutbounds(rt, users),
 		"routing":   map[string]any{"domainStrategy": domainStrategy, "rules": rules},
 	}
 	if dns := xrayDNS(rt.DNS); dns != nil {
@@ -120,7 +142,7 @@ func Xray(inbounds []store.Inbound, users []store.User, apiAddr string, rt Routi
 
 // xrayOutbounds lists the outbounds with the final one first: Xray sends
 // whatever no rule matched to the first outbound.
-func xrayOutbounds(rt Routing) []any {
+func xrayOutbounds(rt Routing, users []store.User) []any {
 	direct := map[string]any{"tag": routing.Direct, "protocol": "freedom"}
 	if s := freedomStrategy(rt.DNS); s != "" {
 		direct["streamSettings"] = map[string]any{"sockopt": map[string]any{"domainStrategy": s}}
@@ -154,6 +176,7 @@ func xrayOutbounds(rt Routing) []any {
 				}},
 				"reserved":       w.Reserved,
 				"mtu":            warpMTU,
+				"noKernelTun":    true,
 				"domainStrategy": strategy,
 			},
 		})
@@ -164,6 +187,29 @@ func xrayOutbounds(rt Routing) []any {
 			o["streamSettings"] = c.Out.Stream
 		}
 		outs = append(outs, o)
+	}
+	base := append([]any(nil), outs...)
+	for _, u := range limitedUsers(users) {
+		for _, original := range base {
+			o := maps.Clone(original.(map[string]any))
+			kind := o["tag"].(string)
+			if kind == routing.Block {
+				continue
+			}
+			o["tag"] = speedTag(kind, u.ID)
+			stream := map[string]any{}
+			if existing, ok := o["streamSettings"].(map[string]any); ok {
+				stream = maps.Clone(existing)
+			}
+			so := map[string]any{}
+			if existing, ok := stream["sockopt"].(map[string]any); ok {
+				so = maps.Clone(existing)
+			}
+			so["mark"] = SpeedMark(u.ID)
+			stream["sockopt"] = so
+			o["streamSettings"] = stream
+			outs = append(outs, o)
+		}
 	}
 	for i, o := range outs {
 		if o.(map[string]any)["tag"] == rt.Final {

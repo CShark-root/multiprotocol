@@ -47,11 +47,11 @@ func (s *Store) CreateFirstAdmin(ctx context.Context, username, passwordHash str
 const adminColumns = `id, username, password_hash, COALESCE(totp_secret, ''), created_at`
 
 func (s *Store) AdminByUsername(ctx context.Context, username string) (Admin, error) {
-	return scanAdmin(s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE username = ?`, username))
+	return scanAdmin(s, s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE username = ?`, username))
 }
 
 func (s *Store) AdminByID(ctx context.Context, id int64) (Admin, error) {
-	return scanAdmin(s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = ?`, id))
+	return scanAdmin(s, s.db.QueryRowContext(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = ?`, id))
 }
 
 func (s *Store) SetAdminPassword(ctx context.Context, id int64, passwordHash string) error {
@@ -61,16 +61,24 @@ func (s *Store) SetAdminPassword(ctx context.Context, id int64, passwordHash str
 
 // SetAdminTOTP stores the secret; "" turns two-factor authentication off.
 func (s *Store) SetAdminTOTP(ctx context.Context, id int64, secret string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE admins SET totp_secret = ? WHERE id = ?`,
-		sql.NullString{String: secret, Valid: secret != ""}, id)
+	encrypted, err := s.cipher.encrypt("admin TOTP secret", secret)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE admins SET totp_secret = ? WHERE id = ?`,
+		sql.NullString{String: encrypted, Valid: encrypted != ""}, id)
 	return err
 }
 
-func scanAdmin(row *sql.Row) (Admin, error) {
+func scanAdmin(s *Store, row *sql.Row) (Admin, error) {
 	var a Admin
 	var created int64
 	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.TOTPSecret, &created); err != nil {
 		return Admin{}, notFound(err)
+	}
+	var err error
+	if a.TOTPSecret, err = s.cipher.decrypt("admin TOTP secret", a.TOTPSecret); err != nil {
+		return Admin{}, err
 	}
 	a.CreatedAt = fromUnix(created)
 	return a, nil

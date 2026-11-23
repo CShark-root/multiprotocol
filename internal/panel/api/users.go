@@ -12,38 +12,45 @@ import (
 )
 
 type userDTO struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	Note         string     `json:"note"`
-	Enabled      bool       `json:"enabled"`
-	Status       string     `json:"status"`
-	TrafficLimit int64      `json:"trafficLimit"`
-	TrafficUsed  int64      `json:"trafficUsed"`
-	ResetPeriod  string     `json:"resetPeriod"`
-	ExpireAt     *time.Time `json:"expireAt"`
-	SubToken     string     `json:"subToken"`
-	AmneziaKey   string     `json:"amneziaKey"`
-	SubHidden    []int64    `json:"subHidden"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	ID                 int64      `json:"id"`
+	Name               string     `json:"name"`
+	Note               string     `json:"note"`
+	Enabled            bool       `json:"enabled"`
+	Status             string     `json:"status"`
+	TrafficLimit       int64      `json:"trafficLimit"`
+	TrafficUsed        int64      `json:"trafficUsed"`
+	SpeedLimitMbps     int        `json:"speedLimitMbps"`
+	QuotaAction        string     `json:"quotaAction"`
+	ThrottledSpeedMbps int        `json:"throttledSpeedMbps"`
+	ResetPeriod        string     `json:"resetPeriod"`
+	ExpireAt           *time.Time `json:"expireAt"`
+	SubToken           string     `json:"subToken"`
+	AmneziaKey         string     `json:"amneziaKey"`
+	SubHidden          []int64    `json:"subHidden"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 type userInputDTO struct {
-	Name         string     `json:"name"`
-	Note         string     `json:"note"`
-	Enabled      *bool      `json:"enabled"` // omitted = true
-	TrafficLimit int64      `json:"trafficLimit"`
-	ResetPeriod  string     `json:"resetPeriod"`
-	ExpireAt     *time.Time `json:"expireAt"`
-	AmneziaKey   string     `json:"amneziaKey"`
-	SubHidden    []int64    `json:"subHidden"`
+	Name               string     `json:"name"`
+	Note               string     `json:"note"`
+	Enabled            *bool      `json:"enabled"` // omitted = true
+	TrafficLimit       int64      `json:"trafficLimit"`
+	SpeedLimitMbps     int        `json:"speedLimitMbps"`
+	QuotaAction        string     `json:"quotaAction"`
+	ThrottledSpeedMbps int        `json:"throttledSpeedMbps"`
+	ResetPeriod        string     `json:"resetPeriod"`
+	ExpireAt           *time.Time `json:"expireAt"`
+	AmneziaKey         string     `json:"amneziaKey"`
+	SubHidden          []int64    `json:"subHidden"`
 }
 
 func (s *server) toUserDTO(u store.User) userDTO {
 	return userDTO{
 		ID: u.ID, Name: u.Name, Note: u.Note, Enabled: u.Enabled,
 		Status:       string(service.StatusOf(u, s.Users.Now())),
-		TrafficLimit: u.TrafficLimit, TrafficUsed: u.TrafficUsed, ResetPeriod: u.ResetPeriod,
+		TrafficLimit: u.TrafficLimit, TrafficUsed: u.TrafficUsed, SpeedLimitMbps: u.SpeedLimitMbps,
+		QuotaAction: u.QuotaAction, ThrottledSpeedMbps: u.ThrottledSpeedMbps, ResetPeriod: u.ResetPeriod,
 		ExpireAt: u.ExpireAt, SubToken: u.SubToken, AmneziaKey: u.AmneziaKey, SubHidden: append([]int64{}, u.SubHidden...), CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
 	}
 }
@@ -52,7 +59,8 @@ func (in userInputDTO) toInput() service.UserInput {
 	enabled := in.Enabled == nil || *in.Enabled
 	return service.UserInput{
 		Name: in.Name, Note: in.Note, Enabled: enabled,
-		TrafficLimit: in.TrafficLimit, ResetPeriod: in.ResetPeriod, ExpireAt: in.ExpireAt, AmneziaKey: in.AmneziaKey, SubHidden: in.SubHidden,
+		TrafficLimit: in.TrafficLimit, SpeedLimitMbps: in.SpeedLimitMbps, QuotaAction: in.QuotaAction,
+		ThrottledSpeedMbps: in.ThrottledSpeedMbps, ResetPeriod: in.ResetPeriod, ExpireAt: in.ExpireAt, AmneziaKey: in.AmneziaKey, SubHidden: in.SubHidden,
 	}
 }
 

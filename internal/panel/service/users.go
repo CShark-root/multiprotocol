@@ -46,26 +46,32 @@ var ResetPeriods = []string{"none", "day", "week", "month"}
 var userNameRe = regexp.MustCompile(`^[\p{L}\p{N}_.-]{1,64}$`)
 
 type UserInput struct {
-	Name         string
-	Note         string
-	Enabled      bool
-	TrafficLimit int64
-	ResetPeriod  string
-	ExpireAt     *time.Time
-	AmneziaKey   string // vpn://... from the Amnezia app, or empty
-	SubHidden    []int64
+	Name               string
+	Note               string
+	Enabled            bool
+	TrafficLimit       int64
+	SpeedLimitMbps     int
+	QuotaAction        string
+	ThrottledSpeedMbps int
+	ResetPeriod        string
+	ExpireAt           *time.Time
+	AmneziaKey         string // vpn://... from the Amnezia app, or empty
+	SubHidden          []int64
 }
 
 var amneziaKeyRe = regexp.MustCompile(`^vpn://[A-Za-z0-9_=+/-]+$`)
 
 func (in UserInput) normalize() (store.UserFields, error) {
 	f := store.UserFields{
-		Name:         strings.TrimSpace(in.Name),
-		Note:         strings.TrimSpace(in.Note),
-		Enabled:      in.Enabled,
-		TrafficLimit: in.TrafficLimit,
-		ResetPeriod:  in.ResetPeriod,
-		AmneziaKey:   strings.Join(strings.Fields(in.AmneziaKey), ""),
+		Name:               strings.TrimSpace(in.Name),
+		Note:               strings.TrimSpace(in.Note),
+		Enabled:            in.Enabled,
+		TrafficLimit:       in.TrafficLimit,
+		SpeedLimitMbps:     in.SpeedLimitMbps,
+		QuotaAction:        in.QuotaAction,
+		ThrottledSpeedMbps: in.ThrottledSpeedMbps,
+		ResetPeriod:        in.ResetPeriod,
+		AmneziaKey:         strings.Join(strings.Fields(in.AmneziaKey), ""),
 	}
 	// An AmneziaWG config made by the panel keeps its lines.
 	if conf := strings.TrimSpace(strings.ReplaceAll(in.AmneziaKey, "\r\n", "\n")); strings.HasPrefix(conf, "[Interface]") {
@@ -96,6 +102,18 @@ func (in UserInput) normalize() (store.UserFields, error) {
 	}
 	if f.TrafficLimit < 0 {
 		return f, validate.Fail("trafficLimit", "must be 0 (unlimited) or positive")
+	}
+	if f.SpeedLimitMbps < 0 || f.SpeedLimitMbps > 1000000 {
+		return f, validate.Fail("speedLimitMbps", "must be between 0 and 1000000")
+	}
+	if f.QuotaAction == "" {
+		f.QuotaAction = "block"
+	}
+	if f.QuotaAction != "block" && f.QuotaAction != "throttle" {
+		return f, validate.Fail("quotaAction", "must be block or throttle")
+	}
+	if f.QuotaAction == "throttle" && (f.ThrottledSpeedMbps < 1 || f.ThrottledSpeedMbps > 1000000) {
+		return f, validate.Fail("throttledSpeedMbps", "must be between 1 and 1000000")
 	}
 	if !slices.Contains(ResetPeriods, f.ResetPeriod) {
 		return f, validate.Fail("resetPeriod", "one of "+strings.Join(ResetPeriods, ", "))

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, CalendarPlus, ChevronLeft, ChevronRight, CircleCheck, Clock, Gauge, Pencil, Plus, Power, QrCode, RotateCcw, Search, Trash2, UserPlus } from 'lucide-react'
-import { ApiError, api, type OnlineEntry, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
+import { ApiError, api, type OnlineEntry, type QuotaAction, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
 import { GiB, cn, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, RowMenu, Select, Switch, UsageRing } from '@/components/ui'
 import { useNavigate, useSearch } from '@tanstack/react-router'
@@ -20,7 +20,7 @@ const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'>
 const resetPeriods: ResetPeriod[] = ['none', 'day', 'week', 'month']
 
 function toInput(u: User): UserInput {
-  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, resetPeriod: u.resetPeriod, expireAt: u.expireAt, amneziaKey: u.amneziaKey, subHidden: u.subHidden }
+  return { name: u.name, note: u.note, enabled: u.enabled, trafficLimit: u.trafficLimit, speedLimitMbps: u.speedLimitMbps, quotaAction: u.quotaAction, throttledSpeedMbps: u.throttledSpeedMbps, resetPeriod: u.resetPeriod, expireAt: u.expireAt, amneziaKey: u.amneziaKey, subHidden: u.subHidden }
 }
 
 export function UsersPage() {
@@ -318,6 +318,9 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
   const [name, setName] = useState(user?.name ?? '')
   const [note, setNote] = useState(user?.note ?? '')
   const [limitGb, setLimitGb] = useState(user ? String(+(user.trafficLimit / GiB).toFixed(2)) : '0')
+  const [speedLimit, setSpeedLimit] = useState(String(user?.speedLimitMbps ?? 0))
+  const [quotaAction, setQuotaAction] = useState<QuotaAction>(user?.quotaAction ?? 'block')
+  const [throttledSpeed, setThrottledSpeed] = useState(String(user?.throttledSpeedMbps ?? 5))
   const [resetPeriod, setResetPeriod] = useState<ResetPeriod>(user?.resetPeriod ?? 'none')
   const [expire, setExpire] = useState(toDateInput(user?.expireAt ?? null))
   const [enabled, setEnabled] = useState(user?.enabled ?? true)
@@ -344,7 +347,7 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
     e.preventDefault()
     setErrors({})
     const gb = Math.max(0, Number(limitGb.replace(',', '.')) || 0)
-    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), expireAt: fromDateInput(expire), amneziaKey, subHidden })
+    save.mutate({ name, note, enabled, resetPeriod, trafficLimit: Math.round(gb * GiB), speedLimitMbps: Math.max(0, Math.round(Number(speedLimit) || 0)), quotaAction, throttledSpeedMbps: Math.max(0, Math.round(Number(throttledSpeed) || 0)), expireAt: fromDateInput(expire), amneziaKey, subHidden })
   }
 
   return (
@@ -372,6 +375,33 @@ function UserDialog({ user, onClose, onSaved }: { user: User | null; onClose: ()
             )}
           </Field>
         </div>
+        <section className="overflow-hidden rounded-xl border bg-muted/20">
+          <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
+            <Gauge className="h-4 w-4 text-muted-foreground" />
+            {t('users.speedTitle')}
+          </div>
+          <div className="divide-y px-4">
+            {Number(limitGb) > 0 && (
+              <Field className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_190px] items-center gap-3 py-3" label={t('users.quotaAction')} error={errors.quotaAction}>
+                {(id) => (
+                  <Select id={id} value={quotaAction} onChange={(e) => setQuotaAction(e.target.value as QuotaAction)}>
+                    <option value="block">{t('users.quotaBlock')}</option>
+                    <option value="throttle">{t('users.quotaThrottle')}</option>
+                  </Select>
+                )}
+              </Field>
+            )}
+            {Number(limitGb) > 0 && quotaAction === 'throttle' && (
+              <Field className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_180px] items-center gap-3 py-3 [&>p]:sm:col-start-2" label={t('users.throttledSpeed')} error={errors.throttledSpeedMbps}>
+                {(id) => <Input id={id} type="number" min="1" step="1" value={throttledSpeed} onChange={(e) => setThrottledSpeed(e.target.value)} required />}
+              </Field>
+            )}
+            <Field className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_180px] items-center gap-3 py-3 [&>p]:sm:col-start-2" label={t('users.speedLimit')} error={errors.speedLimitMbps}>
+              {(id) => <Input id={id} type="number" min="0" step="1" value={speedLimit} onChange={(e) => setSpeedLimit(e.target.value)} />}
+            </Field>
+          </div>
+          <p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground">{t('users.speedCardHint')}</p>
+        </section>
         <Field label={t('users.expireAt')} hint={t('users.expireAtHint')} error={errors.expireAt}>
           {(id) => <Input id={id} type="date" value={expire} onChange={(e) => setExpire(e.target.value)} />}
         </Field>

@@ -9,37 +9,55 @@ import (
 )
 
 type User struct {
-	ID           int64
-	Name         string
-	Note         string
-	Enabled      bool
-	TrafficLimit int64 // bytes, 0 = unlimited
-	TrafficUsed  int64
-	ResetPeriod  string
-	ExpireAt     *time.Time // nil = never
-	SubToken     string
-	UUID         string // VLESS credential
-	LastResetAt  time.Time
-	AmneziaKey   string
-	SubHidden    []int64 // inbounds left out of the subscription
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                 int64
+	Name               string
+	Note               string
+	Enabled            bool
+	TrafficLimit       int64 // bytes, 0 = unlimited
+	TrafficUsed        int64
+	SpeedLimitMbps     int
+	QuotaAction        string
+	ThrottledSpeedMbps int
+	ResetPeriod        string
+	ExpireAt           *time.Time // nil = never
+	SubToken           string
+	UUID               string // VLESS credential
+	LastResetAt        time.Time
+	AmneziaKey         string
+	SubHidden          []int64 // inbounds left out of the subscription
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // UserFields are the admin-editable columns.
 type UserFields struct {
-	Name         string
-	Note         string
-	Enabled      bool
-	TrafficLimit int64
-	ResetPeriod  string
-	ExpireAt     *time.Time
-	AmneziaKey   string // vpn://... shared from the Amnezia app; shown only
-	SubHidden    []int64
+	Name               string
+	Note               string
+	Enabled            bool
+	TrafficLimit       int64
+	SpeedLimitMbps     int
+	QuotaAction        string
+	ThrottledSpeedMbps int
+	ResetPeriod        string
+	ExpireAt           *time.Time
+	AmneziaKey         string // vpn://... shared from the Amnezia app; shown only
+	SubHidden          []int64
 }
 
-const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, reset_period,
-	expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key, sub_hidden`
+const userColumns = `id, name, note, enabled, traffic_limit, traffic_used, speed_limit_mbps,
+	quota_action, throttled_speed_mbps, reset_period, expire_at, sub_token, uuid, last_reset_at,
+	created_at, updated_at, amnezia_key, sub_hidden`
+
+func (u User) QuotaExceeded() bool {
+	return u.TrafficLimit > 0 && u.TrafficUsed >= u.TrafficLimit
+}
+
+func (u User) EffectiveSpeedMbps() int {
+	if u.QuotaExceeded() && u.QuotaAction == "throttle" {
+		return u.ThrottledSpeedMbps
+	}
+	return u.SpeedLimitMbps
+}
 
 // idList stores a list of ids as JSON ("" when empty).
 func idList(ids []int64) string {
@@ -64,7 +82,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	defer rows.Close()
 	users := []User{}
 	for rows.Next() {
-		u, err := scanUser(rows)
+		u, err := scanUser(s, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -74,17 +92,17 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE id = ?`, id))
+	u, err := scanUser(s, s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 	return u, notFound(err)
 }
 
 func (s *Store) GetUserByName(ctx context.Context, name string) (User, error) {
-	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE name = ?`, name))
+	u, err := scanUser(s, s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE name = ?`, name))
 	return u, notFound(err)
 }
 
 func (s *Store) GetUserBySubToken(ctx context.Context, token string) (User, error) {
-	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE sub_token = ?`, token))
+	u, err := scanUser(s, s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE sub_token_hash = ?`, s.cipher.tokenHash(token)))
 	return u, notFound(err)
 }
 
@@ -175,11 +193,23 @@ func (s *Store) PruneTrafficDaily(ctx context.Context, before string) error {
 }
 
 func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid string, now time.Time) (User, error) {
+	encryptedToken, err := s.cipher.encrypt("user subscription token", subToken)
+	if err != nil {
+		return User{}, err
+	}
+	encryptedUUID, err := s.cipher.encrypt("user UUID", uuid)
+	if err != nil {
+		return User{}, err
+	}
+	amneziaKey, err := s.cipher.encrypt("user Amnezia key", f.AmneziaKey)
+	if err != nil {
+		return User{}, err
+	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users
-		(name, note, enabled, traffic_limit, reset_period, expire_at, sub_token, uuid, last_reset_at, created_at, updated_at, amnezia_key, sub_hidden)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), subToken, uuid,
-		now.Unix(), now.Unix(), now.Unix(), f.AmneziaKey, idList(f.SubHidden))
+		(name, note, enabled, traffic_limit, speed_limit_mbps, quota_action, throttled_speed_mbps, reset_period, expire_at, sub_token, sub_token_hash, uuid, last_reset_at, created_at, updated_at, amnezia_key, sub_hidden)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.SpeedLimitMbps, f.QuotaAction, f.ThrottledSpeedMbps, f.ResetPeriod, unixOrNull(f.ExpireAt), encryptedToken, s.cipher.tokenHash(subToken), encryptedUUID,
+		now.Unix(), now.Unix(), now.Unix(), amneziaKey, idList(f.SubHidden))
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -194,10 +224,15 @@ func (s *Store) CreateUser(ctx context.Context, f UserFields, subToken, uuid str
 }
 
 func (s *Store) UpdateUser(ctx context.Context, id int64, f UserFields, now time.Time) (User, error) {
+	amneziaKey, err := s.cipher.encrypt("user Amnezia key", f.AmneziaKey)
+	if err != nil {
+		return User{}, err
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE users SET
-		name = ?, note = ?, enabled = ?, traffic_limit = ?, reset_period = ?, expire_at = ?, amnezia_key = ?, sub_hidden = ?, updated_at = ?
+		name = ?, note = ?, enabled = ?, traffic_limit = ?, speed_limit_mbps = ?, quota_action = ?, throttled_speed_mbps = ?,
+		reset_period = ?, expire_at = ?, amnezia_key = ?, sub_hidden = ?, updated_at = ?
 		WHERE id = ?`,
-		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.ResetPeriod, unixOrNull(f.ExpireAt), f.AmneziaKey, idList(f.SubHidden), now.Unix(), id)
+		f.Name, f.Note, f.Enabled, f.TrafficLimit, f.SpeedLimitMbps, f.QuotaAction, f.ThrottledSpeedMbps, f.ResetPeriod, unixOrNull(f.ExpireAt), amneziaKey, idList(f.SubHidden), now.Unix(), id)
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
@@ -242,14 +277,23 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 
 type scanner interface{ Scan(dest ...any) error }
 
-func scanUser(row scanner) (User, error) {
+func scanUser(s *Store, row scanner) (User, error) {
 	var u User
 	var enabled, lastReset, created, updated int64
 	var expire sql.NullInt64
 	var hidden string
-	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.ResetPeriod,
-		&expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated, &u.AmneziaKey, &hidden)
+	err := row.Scan(&u.ID, &u.Name, &u.Note, &enabled, &u.TrafficLimit, &u.TrafficUsed, &u.SpeedLimitMbps,
+		&u.QuotaAction, &u.ThrottledSpeedMbps, &u.ResetPeriod, &expire, &u.SubToken, &u.UUID, &lastReset, &created, &updated, &u.AmneziaKey, &hidden)
 	if err != nil {
+		return User{}, err
+	}
+	if u.SubToken, err = s.cipher.decrypt("user subscription token", u.SubToken); err != nil {
+		return User{}, err
+	}
+	if u.UUID, err = s.cipher.decrypt("user UUID", u.UUID); err != nil {
+		return User{}, err
+	}
+	if u.AmneziaKey, err = s.cipher.decrypt("user Amnezia key", u.AmneziaKey); err != nil {
 		return User{}, err
 	}
 	u.Enabled = enabled != 0

@@ -1,9 +1,8 @@
-// Package nethelper keeps the one firewall table the panel owns: UDP port
-// hopping for Hysteria2 (a range of ports redirected to the inbound's real
-// port). Writing nftables needs root, so a tiny helper service (root,
-// CAP_NET_ADMIN only) does it on the panel's request over a unix socket.
-// It only ever replaces the table "inet panel_hop"; Docker's, Amnezia's
-// and everyone else's rules are never read or touched.
+// Package nethelper owns Hysteria2 UDP port hopping and per-user download
+// limits. Writing nftables and cleaning up old tc rules needs root, so a tiny
+// helper service (CAP_NET_ADMIN only) does it on the panel's request over a
+// unix socket. Only the panel's nft tables and explicit user packet marks are
+// managed; Amnezia and other unmarked traffic are never rate-limited.
 package nethelper
 
 import (
@@ -149,7 +148,9 @@ func Serve(ctx context.Context, socket string, gid int, panelUID string, log *sl
 	}
 	var mu sync.Mutex
 	var current []Hop
+	limits := &limitState{}
 	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /limits", func(w http.ResponseWriter, r *http.Request) { limits.handle(log, w, r) })
 	mux.HandleFunc("PUT /hops", func(w http.ResponseWriter, r *http.Request) {
 		var hops []Hop
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&hops); err != nil || len(hops) > 50 {
@@ -186,6 +187,11 @@ func Serve(ctx context.Context, socket string, gid int, panelUID string, log *sl
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		apply(c, nil)
+		limits.mu.Lock()
+		defer limits.mu.Unlock()
+		if len(limits.current) > 0 {
+			applySpeedLimits(c, nil)
+		}
 	}()
 	log.Info("net helper listening", "socket", socket)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

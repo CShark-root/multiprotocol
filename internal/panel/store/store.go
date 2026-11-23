@@ -25,10 +25,15 @@ var (
 )
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	cipher *secretCipher
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
+	secret, err := loadSecretCipher(path)
+	if err != nil {
+		return nil, err
+	}
 	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -37,10 +42,25 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	// One connection: SQLite has a single writer anyway, and at our scale
 	// serialising access is simpler than handling SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, cipher: secret}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
+	}
+	changed, err := s.encryptExisting(ctx)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("encrypt stored secrets: %w", err)
+	}
+	if changed {
+		if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("remove plaintext database pages: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("clear plaintext WAL: %w", err)
+		}
 	}
 	return s, nil
 }

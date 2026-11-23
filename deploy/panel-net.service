@@ -1,12 +1,14 @@
 [Unit]
-Description=panel - UDP port hopping for Hysteria2 (own nftables table only)
+Description=panel - UDP port hopping and per-user download limits
 After=network.target
 
 [Service]
 # Writing nftables needs root. This helper only replaces the table
-# "inet panel_hop" (UDP port ranges redirected to Hysteria2 inbounds) on the
-# panel's request over /run/panel-net/helper.sock (group panel). Docker's,
-# Amnezia's and all other rules are never read or changed.
+# "inet panel_hop" (UDP port ranges redirected to Hysteria2 inbounds) and
+# "inet panel_speed" (per-user download limits) on the panel's request over
+# /run/panel-net/helper.sock (group panel). Docker's, Amnezia's and all other
+# firewall rules are never read or changed. Speed limits match only marks
+# assigned to Xray and sing-box users.
 ExecStart=/usr/local/bin/panel net-helper
 Restart=on-failure
 RestartSec=5

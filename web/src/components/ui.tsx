@@ -62,11 +62,13 @@ export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectE
 
 /** Label + control + helper text + error, the building block of every form. */
 export function Field({
+  className,
   label,
   hint,
   error,
   children,
 }: {
+  className?: string
   label: string
   hint?: string
   error?: string
@@ -74,7 +76,7 @@ export function Field({
 }) {
   const id = useId()
   return (
-    <div className="space-y-1.5">
+    <div className={cn('space-y-1.5', className)}>
       <label htmlFor={id} className="block text-sm font-medium">
         {label}
       </label>

@@ -174,7 +174,7 @@ func (s *Store) ListInbounds(ctx context.Context) ([]Inbound, error) {
 	defer rows.Close()
 	list := []Inbound{}
 	for rows.Next() {
-		in, err := scanInbound(rows)
+		in, err := scanInbound(s, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +184,7 @@ func (s *Store) ListInbounds(ctx context.Context) ([]Inbound, error) {
 }
 
 func (s *Store) GetInbound(ctx context.Context, id int64) (Inbound, error) {
-	in, err := scanInbound(s.db.QueryRowContext(ctx, `SELECT `+inboundColumns+` FROM inbounds WHERE id = ?`, id))
+	in, err := scanInbound(s, s.db.QueryRowContext(ctx, `SELECT `+inboundColumns+` FROM inbounds WHERE id = ?`, id))
 	return in, notFound(err)
 }
 
@@ -193,10 +193,14 @@ func (s *Store) CreateInbound(ctx context.Context, f InboundFields, now time.Tim
 	if err != nil {
 		return Inbound{}, err
 	}
+	encrypted, err := s.cipher.encrypt("inbound settings", string(settings))
+	if err != nil {
+		return Inbound{}, err
+	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO inbounds
 		(remark, protocol, transport, security, port, address, settings_json, enabled, test_kit, created_at, updated_at, node_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled, f.TestKit,
+		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, encrypted, f.Enabled, f.TestKit,
 		now.Unix(), now.Unix(), f.NodeID)
 	if err != nil {
 		return Inbound{}, err
@@ -213,10 +217,14 @@ func (s *Store) UpdateInbound(ctx context.Context, id int64, f InboundFields, no
 	if err != nil {
 		return Inbound{}, err
 	}
+	encrypted, err := s.cipher.encrypt("inbound settings", string(settings))
+	if err != nil {
+		return Inbound{}, err
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE inbounds SET
 		remark = ?, protocol = ?, transport = ?, security = ?, port = ?, address = ?, settings_json = ?,
 		enabled = ?, updated_at = ?, node_id = ? WHERE id = ?`,
-		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, string(settings), f.Enabled,
+		f.Remark, f.Protocol, f.Transport, f.Security, f.Port, f.Address, encrypted, f.Enabled,
 		now.Unix(), f.NodeID, id)
 	if err != nil {
 		return Inbound{}, err
@@ -242,12 +250,16 @@ func (s *Store) DeleteInbound(ctx context.Context, id int64) error {
 	return nil
 }
 
-func scanInbound(row scanner) (Inbound, error) {
+func scanInbound(s *Store, row scanner) (Inbound, error) {
 	var in Inbound
 	var settings string
 	var enabled, testKit, created, updated int64
 	err := row.Scan(&in.ID, &in.Remark, &in.Protocol, &in.Transport, &in.Security, &in.Port, &in.Address,
 		&settings, &enabled, &testKit, &created, &updated, &in.NodeID)
+	if err != nil {
+		return Inbound{}, err
+	}
+	settings, err = s.cipher.decrypt("inbound settings", settings)
 	if err != nil {
 		return Inbound{}, err
 	}

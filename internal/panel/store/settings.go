@@ -18,6 +18,10 @@ func (s *Store) GetSetting(ctx context.Context, key string, v any) (bool, error)
 	if err != nil {
 		return false, err
 	}
+	raw, err = s.cipher.decrypt("settings", raw)
+	if err != nil {
+		return false, err
+	}
 	return true, json.Unmarshal([]byte(raw), v)
 }
 
@@ -26,7 +30,11 @@ func (s *Store) SetSetting(ctx context.Context, key string, v any) error {
 	if err != nil {
 		return err
 	}
+	encrypted, err := s.cipher.encrypt("settings", string(raw))
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO settings (key, value_json) VALUES (?, ?)
-		ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`, key, string(raw))
+		ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`, key, encrypted)
 	return err
 }

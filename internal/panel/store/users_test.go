@@ -60,6 +60,31 @@ func TestTrafficDaily(t *testing.T) {
 	}
 }
 
+func TestUserSpeedFields(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	f := UserFields{Name: "limited", Enabled: true, SpeedLimitMbps: 50, QuotaAction: "throttle", ThrottledSpeedMbps: 5}
+	u, err := st.CreateUser(ctx, f, "token", "uuid", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.SpeedLimitMbps = 20
+	f.ThrottledSpeedMbps = 2
+	u, err = st.UpdateUser(ctx, u.ID, f, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetUser(ctx, u.ID)
+	if err != nil || got.SpeedLimitMbps != 20 || got.QuotaAction != "throttle" || got.ThrottledSpeedMbps != 2 {
+		t.Fatalf("speed fields: %+v, %v", got, err)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
