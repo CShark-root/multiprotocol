@@ -513,7 +513,7 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `users/${id}`),
     links: (id: number) => request<UserLinks>('GET', `users/${id}/links`),
     traffic: (id: number, days = 30) => request<DayTraffic[]>('GET', `users/${id}/traffic?days=${days}`),
-    trafficMinutes: (id: number) => request<MinuteTraffic[]>('GET', `users/${id}/traffic/minutes`),
+    trafficMinutes: (id: number, day?: string) => request<MinuteTraffic[]>('GET', `users/${id}/traffic/minutes${day ? `?day=${day}` : ''}`),
     fetches: (id: number) => request<SubFetch[]>('GET', `users/${id}/fetches`),
     extend: (id: number, days: number) => request<User>('POST', `users/${id}/extend`, { days }),
     resetTraffic: (id: number) => request<User>('POST', `users/${id}/reset-traffic`, {}),

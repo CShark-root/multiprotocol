@@ -42,6 +42,7 @@ type client struct {
 	url    string // panel prefix
 	server string // server root
 	http   *http.Client
+	store  *store.Store
 }
 
 func newClient(t *testing.T) *client {
@@ -81,7 +82,7 @@ func newClient(t *testing.T) *client {
 	srv := httptest.NewServer(stealth.Gate(config.DecoyNotFound, map[string]http.Handler{base: h, subPath: sub}))
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &client{t: t, url: srv.URL + "/" + base, server: srv.URL, http: &http.Client{Jar: jar}}
+	return &client{t: t, url: srv.URL + "/" + base, server: srv.URL, http: &http.Client{Jar: jar}, store: st}
 }
 
 // freePort returns a TCP port that is free right now.
@@ -640,4 +641,39 @@ func TestRoutingHistory(t *testing.T) {
 		t.Fatalf("rollback: %v", got["presets"])
 	}
 	c.expect(404, "POST", "/api/routing/history/99/restore", nil)
+}
+
+func TestTrafficMinutesForDay(t *testing.T) {
+	c := newClient(t)
+	c.expect(200, "POST", "/api/auth/setup", map[string]string{"username": "admin", "password": "a-long-enough-password"})
+	c.expect(200, "PUT", "/api/settings/traffic", map[string]bool{"detailed": true})
+	u := c.expect(201, "POST", "/api/users", map[string]any{"name": "history"})
+	id := int64(u["id"].(float64))
+	day := time.Now().AddDate(0, 0, -1)
+	at := time.Date(day.Year(), day.Month(), day.Day(), 12, 34, 0, 0, time.Local)
+	if err := c.store.AddTrafficSample(context.Background(), map[int64]store.TrafficAmount{id: {Up: 20, Down: 100}}, at, true); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/users/%d/traffic/minutes?day=%s", id, at.Format(time.DateOnly))
+	status, body := c.json("GET", path, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", path, status, body)
+	}
+	var rows []store.MinuteTraffic
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1440 {
+		t.Fatalf("got %d points, want 1440", len(rows))
+	}
+	first := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.Local)
+	if rows[0].Minute != first.Unix() || rows[1439].Minute != first.Add(24*time.Hour-time.Minute).Unix() {
+		t.Fatalf("wrong day bounds: %d..%d", rows[0].Minute, rows[1439].Minute)
+	}
+	point := rows[12*60+34]
+	if point.Up != 20 || point.Down != 100 {
+		t.Fatalf("wrong selected-day traffic: %+v", point)
+	}
+	c.expect(400, "GET", path+"x", nil)
+	c.expect(400, "GET", fmt.Sprintf("/api/users/%d/traffic/minutes?day=%s", id, time.Now().AddDate(0, 0, 1).Format(time.DateOnly)), nil)
 }

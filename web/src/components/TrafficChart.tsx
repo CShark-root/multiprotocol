@@ -35,7 +35,7 @@ function barPath(x: number, y: number, w: number, h: number): string {
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`
 }
 
-export function TrafficChart({ data, height = 180 }: { data: DayTraffic[]; height?: number }) {
+export function TrafficChart({ data, height = 180, onSelect }: { data: DayTraffic[]; height?: number; onSelect?: (day: string) => void }) {
   const { t, i18n } = useTranslation()
   const lng = i18n.language
   const wrap = useRef<HTMLDivElement>(null)
@@ -75,6 +75,10 @@ export function TrafficChart({ data, height = 180 }: { data: DayTraffic[]; heigh
       const cur = active ?? data.length
       setActive(Math.max(0, Math.min(data.length - 1, cur + (e.key === 'ArrowLeft' ? -1 : 1))))
     } else if (e.key === 'Escape') setActive(null)
+    else if (onSelect && active !== null && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault()
+      onSelect(data[active].day)
+    }
   }
 
   const shown = active !== null ? data[active] : null
@@ -105,7 +109,11 @@ export function TrafficChart({ data, height = 180 }: { data: DayTraffic[]; heigh
             <tbody>
               {[...data].reverse().map((d) => (
                 <tr key={d.day} className="border-t">
-                  <td className="px-3 py-1.5">{dayLabel(d.day, true)}</td>
+                  <td className="px-3 py-1.5">
+                    {onSelect ? (
+                      <button type="button" className="underline-offset-4 hover:underline" onClick={() => onSelect(d.day)}>{dayLabel(d.day, true)}</button>
+                    ) : dayLabel(d.day, true)}
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(d.bytes, lng)}</td>
                 </tr>
               ))}
@@ -153,7 +161,7 @@ export function TrafficChart({ data, height = 180 }: { data: DayTraffic[]; heigh
                       </text>
                     )}
                     {/* The hit target is the whole column, not just the painted bar. */}
-                    <rect x={AXIS_W + band * i} y={TOP} width={band} height={plotH} fill="transparent" onPointerEnter={() => setActive(i)} />
+                    <rect x={AXIS_W + band * i} y={TOP} width={band} height={plotH} fill="transparent" className={onSelect ? 'cursor-pointer' : undefined} onPointerEnter={() => setActive(i)} onClick={() => onSelect?.(d.day)} />
                   </g>
                 )
               })}

@@ -494,12 +494,14 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
   const traffic = useQuery({ queryKey: ['traffic', 30, user.id], queryFn: () => api.users.traffic(user.id, 30), refetchInterval: 60_000 })
   const trafficSettings = useQuery({ queryKey: ['settings', 'traffic'], queryFn: api.settings.traffic })
   const [graph, setGraph] = useState<'minute' | 'day'>('minute')
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const minuteTraffic = useQuery({
-    queryKey: ['traffic-minutes', user.id],
-    queryFn: () => api.users.trafficMinutes(user.id),
+    queryKey: ['traffic-minutes', user.id, selectedDay ?? 'latest'],
+    queryFn: () => api.users.trafficMinutes(user.id, selectedDay ?? undefined),
     enabled: graph === 'minute' && trafficSettings.data?.detailed === true,
-    refetchInterval: 60_000,
+    refetchInterval: selectedDay ? false : 60_000,
   })
+  const historyExpired = selectedDay !== null && Date.parse(`${toDateInput(new Date().toISOString())}T00:00:00Z`) - Date.parse(`${selectedDay}T00:00:00Z`) > 7 * 86_400_000
   const [confirmReset, setConfirmReset] = useState(false)
   const done = () => {
     qc.invalidateQueries({ queryKey: ['users'] })
@@ -562,7 +564,14 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
 
         <div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm font-medium">{graph === 'minute' ? t('users.traffic24') : t('users.traffic30')}</div>
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {graph === 'minute' && selectedDay ? new Date(`${selectedDay}T00:00:00`).toLocaleDateString(lng, { day: 'numeric', month: 'long', year: 'numeric' }) : t(graph === 'minute' ? 'users.traffic24' : 'users.traffic30')}
+              {graph === 'minute' && selectedDay && (
+                <button type="button" className="text-xs font-normal text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={() => setSelectedDay(null)}>
+                  {t('users.latest24')}
+                </button>
+              )}
+            </div>
             <div className="flex rounded-lg bg-muted p-0.5 text-xs">
               {(['minute', 'day'] as const).map((mode) => (
                 <button key={mode} type="button" onClick={() => setGraph(mode)} className={cn('rounded-md px-2.5 py-1.5 transition', graph === mode ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
@@ -573,9 +582,16 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
           </div>
           <div className="mt-2">
             {graph === 'day' ? (
-              traffic.data ? <TrafficChart data={traffic.data} height={150} /> : <div className="h-[150px]" />
+              traffic.data ? (
+                <>
+                  <p className="mb-3 text-xs text-muted-foreground">{t('users.selectDay')}</p>
+                  <TrafficChart data={traffic.data} height={150} onSelect={(day) => { setSelectedDay(day); setGraph('minute') }} />
+                </>
+              ) : <div className="h-[150px]" />
             ) : trafficSettings.data?.detailed ? (
-              minuteTraffic.data ? <MinuteTrafficChart data={minuteTraffic.data} height={180} /> : <div className="h-[180px]" />
+              historyExpired ? (
+                <p className="rounded-xl bg-muted/60 p-3.5 text-xs text-muted-foreground">{t('users.historyExpired')}</p>
+              ) : minuteTraffic.data ? <MinuteTrafficChart key={selectedDay ?? 'latest'} data={minuteTraffic.data} height={180} /> : <div className="h-[180px]" />
             ) : (
               <p className="rounded-xl bg-muted/60 p-3.5 text-xs text-muted-foreground">{t('users.detailedOff')}</p>
             )}

@@ -108,8 +108,18 @@ func (s *server) userTrafficMinutes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []store.MinuteTraffic{})
 		return
 	}
-	last := s.Users.Now().Truncate(time.Minute)
+	now := s.Users.Now().Local()
+	last := now.Truncate(time.Minute)
 	first := last.Add(-24*time.Hour + time.Minute)
+	if day := r.URL.Query().Get("day"); day != "" {
+		var err error
+		first, err = time.ParseInLocation(time.DateOnly, day, now.Location())
+		if err != nil || first.After(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())) {
+			writeError(w, http.StatusBadRequest, "bad_day", "day must be YYYY-MM-DD and not in the future")
+			return
+		}
+		last = first.Add(24*time.Hour - time.Minute)
+	}
 	rows, err := s.Store.TrafficByMinute(r.Context(), id, first.Unix())
 	if err != nil {
 		s.handleError(w, r, err)
