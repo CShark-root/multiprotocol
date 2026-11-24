@@ -20,6 +20,7 @@ import (
 	"panel/internal/agent"
 	"panel/internal/nethelper"
 	"panel/internal/nodeproto"
+	"panel/internal/panel/compile"
 	"panel/internal/panel/store"
 	"panel/internal/panel/validate"
 )
@@ -43,16 +44,18 @@ type nodeState struct {
 	files   map[string]string // путь относительно dataDir → sha256
 	ready   bool              // желаемое состояние уже собрано
 
-	traffic  []agent.TrafficDelta
-	online   map[string]agent.OnlineEntry
-	health   agent.NodeHealth
-	version  string
-	xrayAPI  string
-	applied  string
-	applyErr string
-	seen     time.Time
-	commands []string
-	down     bool // уже сообщили, что узел пропал
+	traffic      []agent.TrafficDelta
+	rates        map[string]UserRate
+	rateSampleAt time.Time
+	online       map[string]agent.OnlineEntry
+	health       agent.NodeHealth
+	version      string
+	xrayAPI      string
+	applied      string
+	applyErr     string
+	seen         time.Time
+	commands     []string
+	down         bool // уже сообщили, что узел пропал
 
 	wake chan struct{} // будит ждущий sync
 }
@@ -261,6 +264,12 @@ func (n *Nodes) XrayAPI(id int64) string {
 func (n *Nodes) Sync(ctx context.Context, node store.Node, req nodeproto.SyncRequest) nodeproto.SyncResponse {
 	n.mu.Lock()
 	s := n.state(node.ID)
+	now := n.now()
+	seconds := now.Sub(s.rateSampleAt).Seconds()
+	if !s.rateSampleAt.IsZero() && seconds > 0 && seconds < 5*60 {
+		s.rates = calculateNodeRates(req.Traffic, seconds)
+	}
+	s.rateSampleAt = now
 	s.traffic = append(s.traffic, req.Traffic...)
 	if req.Online != nil {
 		s.online = req.Online
@@ -269,9 +278,9 @@ func (n *Nodes) Sync(ctx context.Context, node store.Node, req nodeproto.SyncReq
 	newAPI := req.XrayAPI != s.xrayAPI
 	s.xrayAPI = req.XrayAPI
 	wasDown := s.down
-	s.seen, s.down = n.now(), false
+	s.seen, s.down = now, false
 	n.mu.Unlock()
-	n.store.TouchNode(ctx, node.ID, n.now())
+	n.store.TouchNode(ctx, node.ID, now)
 	if wasDown {
 		n.events.Add(ctx, EventNodeUp, "info", 0, "", map[string]any{"node": node.Name})
 	}
@@ -325,6 +334,41 @@ func (n *Nodes) Command(id int64, cmd string) {
 	case s.wake <- struct{}{}:
 	default:
 	}
+}
+
+func calculateNodeRates(deltas []agent.TrafficDelta, seconds float64) map[string]UserRate {
+	rates := map[string]UserRate{}
+	for _, d := range deltas {
+		rate := rates[d.Email]
+		rate.UpBps += int64(float64(d.Up) / seconds)
+		rate.DownBps += int64(float64(d.Down) / seconds)
+		rates[d.Email] = rate
+	}
+	return rates
+}
+
+// Rates сохраняет скорость узла между его отчётами раз в MaxWait секунд.
+func (n *Nodes) Rates() map[int64]UserRate {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := map[int64]UserRate{}
+	now := n.now()
+	for _, s := range n.states {
+		if now.Sub(s.rateSampleAt) > (2*nodeproto.MaxWait+10)*time.Second {
+			continue
+		}
+		for email, rate := range s.rates {
+			id, ok := compile.UserIDFromEmail(email)
+			if !ok {
+				continue
+			}
+			total := out[id]
+			total.UpBps += rate.UpBps
+			total.DownBps += rate.DownBps
+			out[id] = total
+		}
+	}
+	return out
 }
 
 // TakeTraffic забирает накопленный трафик всех узлов.

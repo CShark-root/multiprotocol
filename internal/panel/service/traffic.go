@@ -42,6 +42,17 @@ func (s *Syncer) updateRates(amounts map[int64]store.TrafficAmount, now time.Tim
 	s.rates = rates
 }
 
+func (s *Syncer) mergeRates(remote map[int64]UserRate) {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	for id, rate := range remote {
+		total := s.rates[id]
+		total.UpBps += rate.UpBps
+		total.DownBps += rate.DownBps
+		s.rates[id] = total
+	}
+}
+
 func (s *Syncer) Rates() map[int64]UserRate {
 	s.rateMu.RLock()
 	defer s.rateMu.RUnlock()

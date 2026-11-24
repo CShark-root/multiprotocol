@@ -216,9 +216,6 @@ func (s *Syncer) watchCores(ctx context.Context) {
 
 func (s *Syncer) collect(ctx context.Context, measureRate bool) error {
 	deltas, err := s.agent.Traffic(ctx)
-	if s.nodes != nil {
-		deltas = append(deltas, s.nodes.TakeTraffic()...)
-	}
 	byUser := map[int64]store.TrafficAmount{}
 	for _, d := range deltas {
 		if id, ok := compile.UserIDFromEmail(d.Email); ok {
@@ -231,6 +228,19 @@ func (s *Syncer) collect(ctx context.Context, measureRate bool) error {
 	now := s.now()
 	if measureRate && err == nil {
 		s.updateRates(byUser, now)
+		if s.nodes != nil {
+			s.mergeRates(s.nodes.Rates())
+		}
+	}
+	if s.nodes != nil {
+		for _, d := range s.nodes.TakeTraffic() {
+			if id, ok := compile.UserIDFromEmail(d.Email); ok {
+				a := byUser[id]
+				a.Up += d.Up
+				a.Down += d.Down
+				byUser[id] = a
+			}
+		}
 	}
 	if len(byUser) > 0 {
 		if err := s.store.AddTrafficSample(ctx, byUser, now, s.detailEnabled.Load()); err != nil {

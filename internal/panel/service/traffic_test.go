@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"panel/internal/agent"
 	"panel/internal/panel/store"
 )
 
@@ -40,6 +41,31 @@ func TestUserButtonMarks(t *testing.T) {
 	u.QuotaAction = "block"
 	if got := userButton(u, now, 1); !strings.HasPrefix(got, "🔴") {
 		t.Fatalf("stopped: %s", got)
+	}
+}
+
+func TestNodeRatesUseReportInterval(t *testing.T) {
+	deltas := []agent.TrafficDelta{{Email: "u1", Up: 125, Down: 500}, {Email: "u1", Up: 125, Down: 500}}
+	rate := calculateNodeRates(deltas, 25)["u1"]
+	if rate.UpBps != 10 || rate.DownBps != 40 {
+		t.Fatalf("rate %+v", rate)
+	}
+}
+
+func TestNodeRatesRemainBetweenReports(t *testing.T) {
+	now := time.Now()
+	nodes := NewNodes(nil, nil, "", nil)
+	nodes.now = func() time.Time { return now }
+	state := nodes.state(1)
+	state.rateSampleAt = now
+	state.rates = map[string]UserRate{"u1": {UpBps: 10, DownBps: 40}}
+	now = now.Add(5 * time.Second)
+	if rate := nodes.Rates()[1]; rate.UpBps != 10 || rate.DownBps != 40 {
+		t.Fatalf("rate between reports %+v", rate)
+	}
+	now = now.Add(time.Minute)
+	if len(nodes.Rates()) != 0 {
+		t.Fatal("node rates must expire when reports stop")
 	}
 }
 
