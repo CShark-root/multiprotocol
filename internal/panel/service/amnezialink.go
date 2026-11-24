@@ -66,7 +66,7 @@ func (s *Syncer) collectAmnezia(ctx context.Context) error {
 			return err
 		}
 	}
-	byUser := map[int64]int64{}
+	byUser := map[int64]store.TrafficAmount{}
 	var changed []store.AmneziaLink
 	for _, l := range links {
 		cl, ok := clients[[2]string{l.Container, l.Key}]
@@ -74,20 +74,23 @@ func (s *Syncer) collectAmnezia(ctx context.Context) error {
 			continue // клиент выключен или удалён в приложении
 		}
 		if l.Rx >= 0 && l.Tx >= 0 {
-			byUser[l.UserID] += growth(l.Rx, cl.RxBytes) + growth(l.Tx, cl.TxBytes)
+			a := byUser[l.UserID]
+			a.Up += growth(l.Rx, cl.RxBytes)
+			a.Down += growth(l.Tx, cl.TxBytes)
+			byUser[l.UserID] = a
 		}
 		if l.Rx != cl.RxBytes || l.Tx != cl.TxBytes {
 			l.Rx, l.Tx = cl.RxBytes, cl.TxBytes
 			changed = append(changed, l)
 		}
 	}
-	for id, b := range byUser {
-		if b == 0 {
+	for id, a := range byUser {
+		if a.Up+a.Down == 0 {
 			delete(byUser, id)
 		}
 	}
 	if len(byUser) > 0 {
-		if err := s.store.AddTraffic(ctx, byUser, s.now()); err != nil {
+		if err := s.store.AddTrafficSample(ctx, byUser, s.now(), s.detailEnabled.Load()); err != nil {
 			return err
 		}
 	}

@@ -45,7 +45,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export type Admin = { id: number; username: string }
 export type AuthState = { setupRequired: boolean; authenticated: boolean; admin?: Admin }
 
-export type UserStatus = 'active' | 'disabled' | 'expired' | 'limited'
+export type UserStatus = 'active' | 'disabled' | 'expired' | 'limited' | 'throttled'
 export type ResetPeriod = 'none' | 'day' | 'week' | 'month'
 export type QuotaAction = 'block' | 'throttle'
 
@@ -83,8 +83,10 @@ export type UserInput = {
   subHidden: number[]
 }
 
-export type OnlineEntry = { userId: number; ips: string[]; connections: number }
+export type OnlineEntry = { userId: number; ips: string[]; connections: number; upBps: number; downBps: number }
 export type DayTraffic = { day: string; bytes: number }
+export type MinuteTraffic = { minute: number; up: number; down: number }
+export type TrafficSettings = { detailed: boolean }
 
 export type Outbound = 'direct' | 'block' | 'warp' | 'ipv4' | `out:${string}`
 export type CustomOut = { id: string; name: string; summary: string; link?: string; server?: string } // server: "main" или id узла
@@ -424,6 +426,8 @@ export const api = {
     panel: () => request<{ settings: PanelSettings; pending: boolean; restartSupported: boolean }>('GET', 'settings/panel'),
     savePanel: (s: PanelSettings & { password: string }) => request<{ pending: boolean; url: string }>('PUT', 'settings/panel', s),
     restart: () => request<{ restarting: boolean }>('POST', 'settings/restart', {}),
+    traffic: () => request<TrafficSettings>('GET', 'settings/traffic'),
+    saveTraffic: (settings: TrafficSettings) => request<TrafficSettings>('PUT', 'settings/traffic', settings),
   },
   logs: (f: LogFilter) => request<LogEntry[]>('GET', 'logs' + query({ ...f, limit: 300 })),
   events: (before?: number) => request<PanelEvent[]>('GET', 'events' + query({ before, limit: 100 })),
@@ -509,6 +513,7 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `users/${id}`),
     links: (id: number) => request<UserLinks>('GET', `users/${id}/links`),
     traffic: (id: number, days = 30) => request<DayTraffic[]>('GET', `users/${id}/traffic?days=${days}`),
+    trafficMinutes: (id: number) => request<MinuteTraffic[]>('GET', `users/${id}/traffic/minutes`),
     fetches: (id: number) => request<SubFetch[]>('GET', `users/${id}/fetches`),
     extend: (id: number, days: number) => request<User>('POST', `users/${id}/extend`, { days }),
     resetTraffic: (id: number) => request<User>('POST', `users/${id}/reset-traffic`, {}),

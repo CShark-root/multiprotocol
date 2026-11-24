@@ -35,6 +35,7 @@ type TelegramSettings struct {
 
 // notifyAlias: событие → переключатель, которым оно включается.
 var notifyAlias = map[string]string{
+	EventUserThrottled: EventUserLimited,
 	EventWarpRecovered: EventWarpRestarted,
 	EventCoresUpdated:  EventCoreUp,
 	EventCoresRollback: EventCoreDown,
@@ -177,7 +178,7 @@ func eventButtons(e store.Event) telegram.Keyboard {
 	nb := func(text, data string) telegram.Button { return btn(text, notifyPrefix+data) }
 	uid := strconv.FormatInt(e.UserID, 10)
 	switch e.Type {
-	case EventUserLimited:
+	case EventUserLimited, EventUserThrottled:
 		return telegram.Keyboard{{nb("↺ Сбросить трафик", "r:"+uid), nb("📦 Лимит", "l:"+uid)}, {nb("Открыть", "c:"+uid)}}
 	case EventUserExpired:
 		return telegram.Keyboard{{nb("+30 дней", "x:"+uid+":30"), nb("+90 дней", "x:"+uid+":90")}, {nb("Открыть", "c:"+uid)}}
@@ -206,6 +207,8 @@ func eventText(e store.Event, name string) string {
 		return "⚠️ Ядро " + str(d, "core") + " остановилось: " + e.Message
 	case EventCoreUp:
 		return "✅ Ядро " + str(d, "core") + " снова работает"
+	case EventUserThrottled:
+		return "🐢 " + name + ": трафик закончился, скорость ограничена до " + str(d, "speedMbps") + " Мбит/с до сброса"
 	case EventUserLimited:
 		return "⛔ " + name + ": закончился трафик, доступ приостановлен"
 	case EventUserExpired:

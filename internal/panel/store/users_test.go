@@ -60,6 +60,32 @@ func TestTrafficDaily(t *testing.T) {
 	}
 }
 
+func TestTrafficMinutes(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Date(2026, 11, 24, 12, 0, 30, 0, time.Local)
+	u, _ := st.CreateUser(ctx, UserFields{Name: "minute", Enabled: true}, "token", "uuid", now)
+	amounts := map[int64]TrafficAmount{u.ID: {Up: 20, Down: 100}}
+	must(t, st.AddTrafficSample(ctx, amounts, now, false))
+	if rows, _ := st.TrafficByMinute(ctx, u.ID, 0); len(rows) != 0 {
+		t.Fatalf("disabled detailed history wrote rows: %+v", rows)
+	}
+	must(t, st.AddTrafficSample(ctx, amounts, now, true))
+	must(t, st.AddTrafficSample(ctx, map[int64]TrafficAmount{u.ID: {Up: 5, Down: 50}}, now.Add(20*time.Second), true))
+	rows, _ := st.TrafficByMinute(ctx, u.ID, 0)
+	if len(rows) != 1 || rows[0].Up != 25 || rows[0].Down != 150 {
+		t.Fatalf("minute aggregation: %+v", rows)
+	}
+	must(t, st.PruneTrafficMinutes(ctx, now.Truncate(time.Minute).Unix()+1))
+	if rows, _ := st.TrafficByMinute(ctx, u.ID, 0); len(rows) != 0 {
+		t.Fatalf("prune left rows: %+v", rows)
+	}
+}
+
 func TestUserSpeedFields(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(ctx, filepath.Join(t.TempDir(), "panel.db"))

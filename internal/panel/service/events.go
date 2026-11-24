@@ -12,6 +12,7 @@ import (
 // an extra technical detail.
 const (
 	EventUserLimited   = "user.limited"
+	EventUserThrottled = "user.throttled"
 	EventUserExpired   = "user.expired"
 	EventUserRestored  = "user.restored"
 	EventCoreDown      = "core.down"

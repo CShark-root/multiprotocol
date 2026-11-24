@@ -16,6 +16,8 @@ type onlineDTO struct {
 	UserID      int64    `json:"userId"`
 	IPs         []string `json:"ips"`
 	Connections int      `json:"connections"`
+	UpBps       int64    `json:"upBps"`
+	DownBps     int64    `json:"downBps"`
 }
 
 // onlineCache keeps the cores from being asked more than once every few
@@ -51,6 +53,13 @@ func (s *server) onlineNow(r *http.Request) ([]onlineDTO, error) {
 	m, err := s.Agent.Online(r.Context())
 	m = service.MergeOnline(m, s.Nodes)
 	c.list, c.at = toOnlineDTO(m), time.Now()
+	if s.Syncer != nil {
+		rates := s.Syncer.Rates()
+		for i := range c.list {
+			rate := rates[c.list[i].UserID]
+			c.list[i].UpBps, c.list[i].DownBps = rate.UpBps, rate.DownBps
+		}
+	}
 	return c.list, err
 }
 
@@ -86,7 +95,38 @@ func (s *server) userTraffic(w http.ResponseWriter, r *http.Request) {
 	s.writeDaily(w, r, id)
 }
 
-// writeDaily answers with one entry per day, oldest first, zero-filled so
+func (s *server) userTrafficMinutes(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.Users.Get(r.Context(), id); err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	if !service.TrafficSettingsOf(r.Context(), s.Store).Detailed {
+		writeJSON(w, http.StatusOK, []store.MinuteTraffic{})
+		return
+	}
+	last := s.Users.Now().Truncate(time.Minute)
+	first := last.Add(-24*time.Hour + time.Minute)
+	rows, err := s.Store.TrafficByMinute(r.Context(), id, first.Unix())
+	if err != nil {
+		s.handleError(w, r, err)
+		return
+	}
+	byMinute := make(map[int64]store.MinuteTraffic, len(rows))
+	for _, row := range rows {
+		byMinute[row.Minute] = row
+	}
+	out := make([]store.MinuteTraffic, 24*60)
+	for i := range out {
+		minute := first.Add(time.Duration(i) * time.Minute).Unix()
+		out[i] = store.MinuteTraffic{Minute: minute, Up: byMinute[minute].Up, Down: byMinute[minute].Down}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // a chart has no gaps. ?days= picks the window (1-366, default 30).
 func (s *server) writeDaily(w http.ResponseWriter, r *http.Request, userID int64) {
 	days := 30

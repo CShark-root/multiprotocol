@@ -34,7 +34,7 @@ export function DashboardPage() {
   const agent = system.data?.localAgent
   // memTotal is 0 when the host exposes no /proc (dev builds on Windows/macOS).
   const sys = agent?.system.memTotal ? agent.system : undefined
-  const activeUsers = users.data?.filter((u) => u.status === 'active').length ?? 0
+  const activeUsers = users.data?.filter((u) => u.status === 'active' || u.status === 'throttled').length ?? 0
   const lng = i18n.language
 
   return (
@@ -316,6 +316,7 @@ function UsersCard({ users, online }: { users: User[]; online: number }) {
   const count = (s: User['status']) => users.filter((u) => u.status === s).length
   const parts = [
     { key: 'active', value: count('active'), color: 'var(--color-success)' },
+    { key: 'throttled', value: count('throttled'), color: 'var(--chart)' },
     { key: 'expired', value: count('expired'), color: 'var(--color-warning)' },
     { key: 'limited', value: count('limited'), color: 'var(--color-destructive)' },
     { key: 'disabled', value: count('disabled'), color: 'var(--color-muted-foreground)' },

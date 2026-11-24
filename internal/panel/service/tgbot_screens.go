@@ -21,8 +21,8 @@ import (
 
 const usersPerPage = 8
 
-var statusMark = map[Status]string{StatusActive: "🟢", StatusDisabled: "⚪", StatusExpired: "⌛", StatusLimited: "⛔"}
-var statusName = map[Status]string{StatusActive: "активен", StatusDisabled: "выключен", StatusExpired: "срок истёк", StatusLimited: "трафик закончился"}
+var statusMark = map[Status]string{StatusActive: "🟢", StatusDisabled: "⚪", StatusExpired: "⌛", StatusLimited: "⛔", StatusThrottled: "🐢"}
+var statusName = map[Status]string{StatusActive: "активен", StatusDisabled: "выключен", StatusExpired: "срок истёк", StatusLimited: "трафик закончился, доступ приостановлен", StatusThrottled: "скорость ограничена"}
 
 var back = func(to string) []telegram.Button {
 	return []telegram.Button{btn("‹ Назад", to), btn("Меню", "m")}
@@ -245,49 +245,18 @@ func nodeLine(n NodeStatus) string {
 	return line + fmt.Sprintf(" · онлайн %d", n.Users)
 }
 
-// filters списка пользователей: a — все, on — онлайн, w — требуют внимания,
-// off — без доступа.
-var userFilters = []struct{ key, name string }{{"a", "Все"}, {"on", "Онлайн"}, {"w", "Внимание"}, {"off", "Без доступа"}}
-
 func (b *Bot) usersScreen(ctx context.Context, filter string, page int) (string, telegram.Keyboard) {
 	list, err := b.d.Users.List(ctx)
 	if err != nil {
 		return "Не удалось прочитать пользователей: " + esc(err.Error()), telegram.Keyboard{back("m")}
 	}
-	if filter == "" {
-		filter = "a"
-	}
+	filter = "a"
 	now := b.d.Users.Now()
 	on := b.online(ctx)
-	var shown []store.User
-	for _, u := range list {
-		st := StatusOf(u, now)
-		keep := true
-		switch filter {
-		case "on":
-			keep = on[u.ID] > 0
-		case "off":
-			keep = st != StatusActive
-		case "w":
-			keep = st == StatusActive && ((u.ExpireAt != nil && daysLeft(*u.ExpireAt, now) <= 7) ||
-				(u.TrafficLimit > 0 && u.TrafficUsed*5 >= u.TrafficLimit*4))
-		}
-		if keep {
-			shown = append(shown, u)
-		}
-	}
-	var kb telegram.Keyboard
-	var tabs []telegram.Button
-	for _, f := range userFilters {
-		name := f.name
-		if f.key == filter {
-			name = "· " + name + " ·"
-		}
-		tabs = append(tabs, btn(name, "u:"+f.key+":0"))
-	}
-	kb = append(kb, tabs)
+	shown := list
 	pages := max(1, (len(shown)+usersPerPage-1)/usersPerPage)
 	page = max(0, min(page, pages-1))
+	kb := telegram.Keyboard{{btn("🔄 Обновить", "u:a:"+strconv.Itoa(page))}}
 	for _, u := range shown[page*usersPerPage : min(len(shown), (page+1)*usersPerPage)] {
 		kb = append(kb, []telegram.Button{btn(userButton(u, now, on[u.ID]), "c:"+strconv.FormatInt(u.ID, 10))})
 	}
@@ -311,7 +280,18 @@ func (b *Bot) usersScreen(ctx context.Context, filter string, page int) (string,
 }
 
 func userButton(u store.User, now time.Time, devices int) string {
-	s := statusMark[StatusOf(u, now)] + " " + u.Name
+	mark := "⚪"
+	switch StatusOf(u, now) {
+	case StatusThrottled:
+		mark = "🟡"
+	case StatusDisabled, StatusExpired, StatusLimited:
+		mark = "🔴"
+	case StatusActive:
+		if devices > 0 {
+			mark = "🟢"
+		}
+	}
+	s := mark + " " + u.Name
 	if u.TrafficLimit > 0 {
 		s += fmt.Sprintf(" · %d%%", percent(float64(u.TrafficUsed), float64(u.TrafficLimit)))
 	} else {

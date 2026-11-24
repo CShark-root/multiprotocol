@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"panel/internal/agent"
@@ -40,6 +41,11 @@ type Syncer struct {
 	lastSync time.Time
 	lastErr  string
 
+	rateMu        sync.RWMutex
+	rates         map[int64]UserRate
+	lastSampleAt  time.Time
+	detailEnabled atomic.Bool
+
 	// What the previous sync saw, to record transitions as events. Only the
 	// sync goroutine touches these.
 	userStatus map[int64]Status
@@ -63,7 +69,7 @@ type Syncer struct {
 func NewSyncer(st *store.Store, ag *agent.Agent, events *Events, xrayAPIAddr string, log *slog.Logger) *Syncer {
 	return &Syncer{
 		store: st, agent: ag, events: events, apiAddr: xrayAPIAddr, log: log, now: time.Now,
-		trigger: make(chan struct{}, 1), coreDown: map[string]bool{},
+		trigger: make(chan struct{}, 1), coreDown: map[string]bool{}, rates: map[int64]UserRate{}, lastSampleAt: time.Now(),
 		amneziaPaused: map[string]string{}, amneziaStarted: map[string]time.Time{},
 	}
 }
@@ -94,19 +100,40 @@ func (s *Syncer) Trigger() {
 }
 
 func (s *Syncer) Run(ctx context.Context) {
+	var settings TrafficSettings
+	if _, err := s.store.GetSetting(ctx, TrafficSettingsKey, &settings); err != nil {
+		s.log.Warn("load traffic settings", "err", err)
+	}
+	s.detailEnabled.Store(settings.Detailed)
+	if err := s.store.PruneTrafficMinutes(ctx, s.now().Add(-7*24*time.Hour).Unix()); err != nil {
+		s.log.Warn("prune minute traffic", "err", err)
+	}
 	s.sync(ctx)
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
+	sample := time.NewTicker(15 * time.Second)
+	apply := time.NewTicker(time.Minute)
+	prune := time.NewTicker(time.Hour)
+	defer sample.Stop()
+	defer apply.Stop()
+	defer prune.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-sample.C:
+			if err := s.collect(ctx); err != nil {
+				s.log.Warn("collect traffic", "err", err)
+			}
+		case <-apply.C:
+			s.sync(ctx)
+		case <-prune.C:
+			if err := s.store.PruneTrafficMinutes(ctx, s.now().Add(-7*24*time.Hour).Unix()); err != nil {
+				s.log.Warn("prune minute traffic", "err", err)
+			}
 		case <-s.trigger:
 			// Let a burst of edits (e.g. toggling several users) land first.
 			time.Sleep(300 * time.Millisecond)
+			s.sync(ctx)
 		}
-		s.sync(ctx)
 	}
 }
 
@@ -155,11 +182,14 @@ func (s *Syncer) recordUserChanges(ctx context.Context, users []store.User, now 
 		}
 		data := map[string]any{"name": u.Name}
 		switch {
+		case cur == StatusThrottled:
+			data["speedMbps"] = u.ThrottledSpeedMbps
+			s.events.Add(ctx, EventUserThrottled, "warning", u.ID, "", data)
 		case cur == StatusLimited:
 			s.events.Add(ctx, EventUserLimited, "warning", u.ID, "", data)
 		case cur == StatusExpired:
 			s.events.Add(ctx, EventUserExpired, "warning", u.ID, "", data)
-		case cur == StatusActive && (was == StatusLimited || was == StatusExpired):
+		case cur == StatusActive && (was == StatusLimited || was == StatusThrottled || was == StatusExpired):
 			s.events.Add(ctx, EventUserRestored, "info", u.ID, "", data)
 		}
 	}
@@ -188,14 +218,19 @@ func (s *Syncer) collect(ctx context.Context) error {
 	if s.nodes != nil {
 		deltas = append(deltas, s.nodes.TakeTraffic()...)
 	}
-	byUser := map[int64]int64{}
+	byUser := map[int64]store.TrafficAmount{}
 	for _, d := range deltas {
 		if id, ok := compile.UserIDFromEmail(d.Email); ok {
-			byUser[id] += d.Up + d.Down
+			a := byUser[id]
+			a.Up += d.Up
+			a.Down += d.Down
+			byUser[id] = a
 		}
 	}
+	now := s.now()
+	s.updateRates(byUser, now)
 	if len(byUser) > 0 {
-		if err := s.store.AddTraffic(ctx, byUser, s.now()); err != nil {
+		if err := s.store.AddTrafficSample(ctx, byUser, now, s.detailEnabled.Load()); err != nil {
 			return err
 		}
 	}
@@ -218,7 +253,7 @@ func (s *Syncer) apply(ctx context.Context) error {
 	for _, u := range users {
 		st := StatusOf(u, now)
 		statuses[u.ID] = st
-		if st == StatusActive || (st == StatusLimited && u.QuotaAction == "throttle") {
+		if st == StatusActive || st == StatusThrottled {
 			active = append(active, u)
 		}
 	}

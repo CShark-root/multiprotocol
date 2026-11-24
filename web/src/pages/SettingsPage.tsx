@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Cpu, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Archive, Activity, Cpu, Check, Download, Globe, KeyRound, Monitor, RefreshCw, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { ApiError, api, basePath, coreVersions, extras, type PanelSettings, type SubSettings } from '@/lib/api'
 import { Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Switch, Tabs, useSavedTab, Section } from '@/components/ui'
 import { CopyButton, QrImage } from '@/components/share'
@@ -34,6 +34,7 @@ export function SettingsPage() {
           )}
           {tab === 'maintenance' && (
             <>
+              <TrafficHistoryCard />
               <UpdateCard />
               <CoresAutoCard />
               <CoreVersionsCard />
@@ -221,6 +222,36 @@ function AddressCard() {
           )}
         </div>
       )}
+    </Section>
+  )
+}
+
+function TrafficHistoryCard() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['settings', 'traffic'], queryFn: api.settings.traffic })
+  const save = useMutation({
+    mutationFn: api.settings.saveTraffic,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings', 'traffic'] })
+      qc.invalidateQueries({ queryKey: ['traffic-minutes'] })
+    },
+  })
+  return (
+    <Section icon={<Activity className="h-4 w-4" />} title={t('settings.trafficHistory')} hint={t('settings.trafficHistoryHint')}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="text-sm">
+          <div className="font-medium">{t('settings.trafficHistoryToggle')}</div>
+          <p className="mt-1 text-xs text-muted-foreground">{t('settings.trafficHistoryRetention')}</p>
+        </div>
+        <Switch
+          checked={q.data?.detailed ?? false}
+          disabled={q.isPending || save.isPending}
+          onChange={(detailed) => save.mutate({ detailed })}
+          label={t('settings.trafficHistoryToggle')}
+        />
+      </div>
+      {save.isError && <p className="mt-3 text-sm text-destructive">{t('common.error')}</p>}
     </Section>
   )
 }

@@ -106,12 +106,28 @@ func (s *Store) GetUserBySubToken(ctx context.Context, token string) (User, erro
 	return u, notFound(err)
 }
 
+type TrafficAmount struct {
+	Up   int64
+	Down int64
+}
+
 // AddTraffic adds bytes to each user's counter and to today's daily row
 // (server local date) in one transaction.
 func (s *Store) AddTraffic(ctx context.Context, byUser map[int64]int64, now time.Time) error {
+	amounts := make(map[int64]TrafficAmount, len(byUser))
+	for id, bytes := range byUser {
+		amounts[id] = TrafficAmount{Down: bytes}
+	}
+	return s.AddTrafficSample(ctx, amounts, now, false)
+}
+
+// AddTrafficSample records total traffic and, when enabled, its minute bucket.
+func (s *Store) AddTrafficSample(ctx context.Context, byUser map[int64]TrafficAmount, now time.Time, detailed bool) error {
 	day := now.Local().Format(time.DateOnly)
+	minute := now.Truncate(time.Minute).Unix()
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		for id, bytes := range byUser {
+		for id, amount := range byUser {
+			bytes := amount.Up + amount.Down
 			res, err := tx.ExecContext(ctx,
 				`UPDATE users SET traffic_used = traffic_used + ?, updated_at = ? WHERE id = ?`,
 				bytes, now.Unix(), id)
@@ -124,6 +140,12 @@ func (s *Store) AddTraffic(ctx context.Context, byUser map[int64]int64, now time
 			if _, err := tx.ExecContext(ctx, `INSERT INTO traffic_daily (user_id, day, bytes) VALUES (?, ?, ?)
 				ON CONFLICT (user_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`, id, day, bytes); err != nil {
 				return err
+			}
+			if detailed {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO traffic_minutes (user_id, minute, up, down) VALUES (?, ?, ?, ?)
+					ON CONFLICT (user_id, minute) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`, id, minute, amount.Up, amount.Down); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -184,6 +206,37 @@ func (s *Store) TrafficByDay(ctx context.Context, userID int64, from string) ([]
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+type MinuteTraffic struct {
+	Minute int64 `json:"minute"`
+	Up     int64 `json:"up"`
+	Down   int64 `json:"down"`
+}
+
+// TrafficByMinute returns fine-grained user traffic starting at a Unix minute.
+func (s *Store) TrafficByMinute(ctx context.Context, userID int64, from int64) ([]MinuteTraffic, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT minute, up, down FROM traffic_minutes
+		WHERE user_id = ? AND minute >= ? ORDER BY minute`, userID, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MinuteTraffic{}
+	for rows.Next() {
+		var p MinuteTraffic
+		if err := rows.Scan(&p.Minute, &p.Up, &p.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// PruneTrafficMinutes enforces the seven-day fine-grained history window.
+func (s *Store) PruneTrafficMinutes(ctx context.Context, before int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM traffic_minutes WHERE minute < ?`, before)
+	return err
 }
 
 // PruneTrafficDaily drops daily rows older than `before` (YYYY-MM-DD).
@@ -270,6 +323,14 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM traffic_daily WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO traffic_minutes (user_id, minute, up, down)
+		SELECT 0, minute, up, down FROM traffic_minutes WHERE user_id = ? AND true
+		ON CONFLICT (user_id, minute) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM traffic_minutes WHERE user_id = ?`, id); err != nil {
 		return err
 	}
 	return tx.Commit()

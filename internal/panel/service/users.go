@@ -18,10 +18,11 @@ import (
 type Status string
 
 const (
-	StatusActive   Status = "active"
-	StatusDisabled Status = "disabled"
-	StatusExpired  Status = "expired"
-	StatusLimited  Status = "limited"
+	StatusActive    Status = "active"
+	StatusDisabled  Status = "disabled"
+	StatusExpired   Status = "expired"
+	StatusLimited   Status = "limited"
+	StatusThrottled Status = "throttled"
 )
 
 // StatusOf derives the effective status. Only "enabled" is stored; the rest
@@ -32,6 +33,8 @@ func StatusOf(u store.User, now time.Time) Status {
 		return StatusDisabled
 	case u.ExpireAt != nil && !now.Before(*u.ExpireAt):
 		return StatusExpired
+	case u.TrafficLimit > 0 && u.TrafficUsed >= u.TrafficLimit && u.QuotaAction == "throttle":
+		return StatusThrottled
 	case u.TrafficLimit > 0 && u.TrafficUsed >= u.TrafficLimit:
 		return StatusLimited
 	default:

@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, CalendarPlus, ChevronLeft, ChevronRight, CircleCheck, Clock, Gauge, Pencil, Plus, Power, QrCode, RotateCcw, Search, Trash2, UserPlus } from 'lucide-react'
 import { ApiError, api, type OnlineEntry, type QuotaAction, type ResetPeriod, type User, type UserInput, type UserStatus } from '@/lib/api'
-import { GiB, cn, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
+import { GiB, cn, formatBitrate, formatBytes, formatDate, fromDateInput, toDateInput } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, RowMenu, Select, Switch, UsageRing } from '@/components/ui'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ShareRow } from '@/components/share'
 import { TrafficChart } from '@/components/TrafficChart'
+import { MinuteTrafficChart } from '@/components/MinuteTrafficChart'
 import { useKindLabel } from './InboundsPage'
 
 const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'> = {
@@ -15,6 +16,7 @@ const statusTone: Record<UserStatus, 'success' | 'muted' | 'warning' | 'danger'>
   disabled: 'muted',
   expired: 'warning',
   limited: 'danger',
+  throttled: 'warning',
 }
 
 const resetPeriods: ResetPeriod[] = ['none', 'day', 'week', 'month']
@@ -109,6 +111,7 @@ export function UsersPage() {
                       <th className="px-5 py-3 font-normal">{t('users.colName')}</th>
                       <th className="px-5 py-3 font-normal">{t('users.colStatus')}</th>
                       <th className="px-5 py-3 font-normal">{t('users.colTraffic')}</th>
+                      <th className="px-5 py-3 font-normal">{t('users.colSpeed')}</th>
                       <th className="px-5 py-3 font-normal">{t('users.colExpire')}</th>
                       <th className="px-5 py-3" />
                     </tr>
@@ -141,6 +144,14 @@ export function UsersPage() {
                                 </div>
                               </div>
                             </div>
+                          </td>
+                          <td className="px-5 py-3">
+                            {onlineBy.has(u.id) ? (
+                              <div className="whitespace-nowrap text-xs tabular-nums">
+                                <div>↓ {formatBitrate(onlineBy.get(u.id)!.downBps, lng)}</div>
+                                <div className="mt-0.5 text-muted-foreground">↑ {formatBitrate(onlineBy.get(u.id)!.upBps, lng)}</div>
+                              </div>
+                            ) : <span className="text-muted-foreground">—</span>}
                           </td>
                           <td className={cn('px-5 py-3 whitespace-nowrap', left === null ? 'text-muted-foreground' : left < 0 ? 'text-destructive' : left <= 3 ? 'text-warning' : 'text-muted-foreground')}>
                             {u.expireAt ? formatDate(u.expireAt, lng) : t('common.never')}
@@ -240,7 +251,7 @@ function ConnectDialog({ user, onClose }: { user: User; onClose: () => void }) {
         <p className="text-sm text-destructive">{t('common.error')}</p>
       ) : (
         <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
-          {user.status !== 'active' && (
+          {user.status !== 'active' && user.status !== 'throttled' && (
             <p className="rounded-xl bg-warning-soft px-3.5 py-2.5 text-sm text-warning">{t('connect.disabledUser')}</p>
           )}
           {(() => {
@@ -481,10 +492,19 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
   const lng = i18n.language
   const qc = useQueryClient()
   const traffic = useQuery({ queryKey: ['traffic', 30, user.id], queryFn: () => api.users.traffic(user.id, 30), refetchInterval: 60_000 })
+  const trafficSettings = useQuery({ queryKey: ['settings', 'traffic'], queryFn: api.settings.traffic })
+  const [graph, setGraph] = useState<'minute' | 'day'>('minute')
+  const minuteTraffic = useQuery({
+    queryKey: ['traffic-minutes', user.id],
+    queryFn: () => api.users.trafficMinutes(user.id),
+    enabled: graph === 'minute' && trafficSettings.data?.detailed === true,
+    refetchInterval: 60_000,
+  })
   const [confirmReset, setConfirmReset] = useState(false)
   const done = () => {
     qc.invalidateQueries({ queryKey: ['users'] })
     qc.invalidateQueries({ queryKey: ['traffic'] })
+    qc.invalidateQueries({ queryKey: ['traffic-minutes'] })
   }
   const extend = useMutation({ mutationFn: () => api.users.extend(user.id, 30), onSuccess: done })
   const reset = useMutation({
@@ -530,13 +550,36 @@ function UserDetails({ user, online, onClose, onEdit }: { user: User; online?: O
           <p className="mt-1 text-xs text-muted-foreground">
             {online ? t('users.onlineIps', { ips: online.ips.join(', ') || '—' }) : t('users.offlineHint')}
           </p>
+          {online && (
+            <div className="mt-2 flex gap-4 text-xs tabular-nums">
+              <span>↓ {formatBitrate(online.downBps, lng)}</span>
+              <span>↑ {formatBitrate(online.upBps, lng)}</span>
+            </div>
+          )}
         </div>
 
         <SubFetches userId={user.id} />
 
         <div>
-          <div className="text-sm font-medium">{t('users.traffic30')}</div>
-          <div className="mt-2">{traffic.data ? <TrafficChart data={traffic.data} height={150} /> : <div className="h-[150px]" />}</div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm font-medium">{graph === 'minute' ? t('users.traffic24') : t('users.traffic30')}</div>
+            <div className="flex rounded-lg bg-muted p-0.5 text-xs">
+              {(['minute', 'day'] as const).map((mode) => (
+                <button key={mode} type="button" onClick={() => setGraph(mode)} className={cn('rounded-md px-2.5 py-1.5 transition', graph === mode ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+                  {t(mode === 'minute' ? 'users.byMinute' : 'users.byDay')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-2">
+            {graph === 'day' ? (
+              traffic.data ? <TrafficChart data={traffic.data} height={150} /> : <div className="h-[150px]" />
+            ) : trafficSettings.data?.detailed ? (
+              minuteTraffic.data ? <MinuteTrafficChart data={minuteTraffic.data} height={180} /> : <div className="h-[180px]" />
+            ) : (
+              <p className="rounded-xl bg-muted/60 p-3.5 text-xs text-muted-foreground">{t('users.detailedOff')}</p>
+            )}
+          </div>
         </div>
 
         {confirmReset ? (
@@ -604,7 +647,7 @@ function SubFetches({ userId }: { userId: number }) {
         <p className="mt-1 text-xs text-muted-foreground">{q.isPending ? t('common.loading') : t('users.fetchesNone')}</p>
       ) : (
         <ul className="mt-1.5 space-y-1 text-xs">
-          {list.slice(0, 5).map((f, i) => (
+          {list.slice(0, 2).map((f, i) => (
             <li key={i} className="flex flex-wrap justify-between gap-x-3 text-muted-foreground">
               <span>
                 <span className="font-medium text-foreground">{appName(f.app)}</span> · {f.ip}
@@ -622,6 +665,6 @@ function SubFetches({ userId }: { userId: number }) {
 
 // StatusIcon — значок к статусу пользователя в пилюле.
 function StatusIcon({ status }: { status: UserStatus }) {
-  const Icon = { active: CircleCheck, disabled: Ban, expired: Clock, limited: Gauge }[status]
+  const Icon = { active: CircleCheck, disabled: Ban, expired: Clock, limited: Gauge, throttled: Gauge }[status]
   return <Icon className="h-3.5 w-3.5" />
 }

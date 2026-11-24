@@ -70,6 +70,10 @@ func TestBotScreens(t *testing.T) {
 		t.Fatalf("card must show the traffic bar:\n%s", text)
 	}
 
+	if text, kb := b.screen(ctx, "u:on:0"); !strings.Contains(text, "1 из 1") || len(kb) == 0 || kb[0][0].Text != "🔄 Обновить" {
+		t.Fatalf("the user list must stay unfiltered and start with refresh:\n%s\n%+v", text, kb)
+	}
+
 	// Мастер: имя текстом → лимит → срок.
 	b.onText(ctx, "/new")
 	if text, _ := b.onText(ctx, "user two"); !strings.Contains(text, "без пробелов") {
