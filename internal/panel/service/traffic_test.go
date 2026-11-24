@@ -45,14 +45,20 @@ func TestUserButtonMarks(t *testing.T) {
 
 func TestUserRates(t *testing.T) {
 	now := time.Now()
-	s := &Syncer{lastSampleAt: now.Add(-15 * time.Second), rates: map[int64]UserRate{}}
-	s.updateRates(map[int64]store.TrafficAmount{1: {Up: 150, Down: 600}}, now)
+	s := &Syncer{lastSampleAt: now.Add(-5 * time.Second), rates: map[int64]UserRate{}, now: func() time.Time { return now }}
+	s.updateRates(map[int64]store.TrafficAmount{1: {Up: 50, Down: 200}}, now)
 	rate := s.Rates()[1]
 	if rate.UpBps != 10 || rate.DownBps != 40 {
 		t.Fatalf("rate %+v", rate)
 	}
-	s.updateRates(map[int64]store.TrafficAmount{}, now.Add(15*time.Second))
+	now = now.Add(5 * time.Second)
+	s.updateRates(map[int64]store.TrafficAmount{}, now)
 	if len(s.Rates()) != 0 {
 		t.Fatal("idle users must not retain an old nonzero rate")
+	}
+	s.updateRates(map[int64]store.TrafficAmount{1: {Up: 50, Down: 200}}, now)
+	now = now.Add(16 * time.Second)
+	if len(s.Rates()) != 0 {
+		t.Fatal("a stale rate must expire after repeated collection failures")
 	}
 }

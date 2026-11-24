@@ -44,6 +44,7 @@ type Syncer struct {
 	rateMu        sync.RWMutex
 	rates         map[int64]UserRate
 	lastSampleAt  time.Time
+	lastRateAt    time.Time
 	detailEnabled atomic.Bool
 
 	// What the previous sync saw, to record transitions as events. Only the
@@ -109,7 +110,7 @@ func (s *Syncer) Run(ctx context.Context) {
 		s.log.Warn("prune minute traffic", "err", err)
 	}
 	s.sync(ctx)
-	sample := time.NewTicker(15 * time.Second)
+	sample := time.NewTicker(5 * time.Second)
 	apply := time.NewTicker(time.Minute)
 	prune := time.NewTicker(time.Hour)
 	defer sample.Stop()
@@ -120,7 +121,7 @@ func (s *Syncer) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-sample.C:
-			if err := s.collect(ctx); err != nil {
+			if err := s.collect(ctx, true); err != nil {
 				s.log.Warn("collect traffic", "err", err)
 			}
 		case <-apply.C:
@@ -146,7 +147,7 @@ func (s *Syncer) Status() (time.Time, string) {
 
 func (s *Syncer) sync(ctx context.Context) {
 	// Traffic first: counters reset when a core restarts with a new config.
-	if err := s.collect(ctx); err != nil {
+	if err := s.collect(ctx, false); err != nil {
 		s.log.Warn("collect traffic", "err", err)
 	}
 	if err := s.collectAmnezia(ctx); err != nil {
@@ -213,7 +214,7 @@ func (s *Syncer) watchCores(ctx context.Context) {
 	}
 }
 
-func (s *Syncer) collect(ctx context.Context) error {
+func (s *Syncer) collect(ctx context.Context, measureRate bool) error {
 	deltas, err := s.agent.Traffic(ctx)
 	if s.nodes != nil {
 		deltas = append(deltas, s.nodes.TakeTraffic()...)
@@ -228,7 +229,9 @@ func (s *Syncer) collect(ctx context.Context) error {
 		}
 	}
 	now := s.now()
-	s.updateRates(byUser, now)
+	if measureRate && err == nil {
+		s.updateRates(byUser, now)
+	}
 	if len(byUser) > 0 {
 		if err := s.store.AddTrafficSample(ctx, byUser, now, s.detailEnabled.Load()); err != nil {
 			return err

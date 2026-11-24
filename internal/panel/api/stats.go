@@ -48,19 +48,25 @@ func (s *server) onlineNow(r *http.Request) ([]onlineDTO, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if time.Since(c.at) < onlineTTL && c.list != nil {
+		s.applyOnlineRates(c.list)
 		return c.list, nil
 	}
 	m, err := s.Agent.Online(r.Context())
 	m = service.MergeOnline(m, s.Nodes)
 	c.list, c.at = toOnlineDTO(m), time.Now()
-	if s.Syncer != nil {
-		rates := s.Syncer.Rates()
-		for i := range c.list {
-			rate := rates[c.list[i].UserID]
-			c.list[i].UpBps, c.list[i].DownBps = rate.UpBps, rate.DownBps
-		}
-	}
+	s.applyOnlineRates(c.list)
 	return c.list, err
+}
+
+func (s *server) applyOnlineRates(list []onlineDTO) {
+	if s.Syncer == nil {
+		return
+	}
+	rates := s.Syncer.Rates()
+	for i := range list {
+		rate := rates[list[i].UserID]
+		list[i].UpBps, list[i].DownBps = rate.UpBps, rate.DownBps
+	}
 }
 
 func toOnlineDTO(m map[string]agent.OnlineEntry) []onlineDTO {

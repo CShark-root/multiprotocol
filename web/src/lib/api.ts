@@ -446,6 +446,7 @@ export const api = {
     remove: (id: number) => request<void>('DELETE', `nodes/${id}`),
     token: (id: number) => request<{ command: string }>('POST', `nodes/${id}/token`),
     restart: (id: number) => request<void>('POST', `nodes/${id}/restart`),
+    updateAgent: (id: number) => request<void>('POST', `nodes/${id}/update`),
   },
   domain: {
     get: () => request<DomainInfo>('GET', 'domain'),

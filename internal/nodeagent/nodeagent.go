@@ -31,6 +31,7 @@ import (
 	"panel/internal/agent"
 	"panel/internal/nethelper"
 	"panel/internal/nodeproto"
+	"panel/internal/panel/service"
 	"panel/internal/shared/version"
 )
 
@@ -257,9 +258,16 @@ func (a *Agent) handle(ctx context.Context, resp nodeproto.SyncResponse) {
 		a.agent.RestartCores() // те же конфиги, новые гео-базы
 	}
 	for _, c := range resp.Commands {
-		if c == nodeproto.CmdRestartCores {
+		switch c {
+		case nodeproto.CmdRestartCores:
 			a.log.Info("restart cores by panel request")
 			a.agent.RestartCores()
+		case nodeproto.CmdUpdateAgent:
+			a.log.Info("update agent by panel request")
+			if err := service.RequestUpdate(a.dataDir, false); err != nil {
+				a.applyErr = err.Error()
+				a.log.Warn("update agent", "err", err)
+			}
 		}
 	}
 }

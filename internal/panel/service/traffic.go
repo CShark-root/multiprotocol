@@ -32,6 +32,7 @@ func (s *Syncer) updateRates(amounts map[int64]store.TrafficAmount, now time.Tim
 	defer s.rateMu.Unlock()
 	seconds := now.Sub(s.lastSampleAt).Seconds()
 	s.lastSampleAt = now
+	s.lastRateAt = now
 	rates := make(map[int64]UserRate, len(amounts))
 	if seconds > 0 && seconds < 5*60 {
 		for id, amount := range amounts {
@@ -44,5 +45,8 @@ func (s *Syncer) updateRates(amounts map[int64]store.TrafficAmount, now time.Tim
 func (s *Syncer) Rates() map[int64]UserRate {
 	s.rateMu.RLock()
 	defer s.rateMu.RUnlock()
+	if s.now != nil && !s.lastRateAt.IsZero() && s.now().Sub(s.lastRateAt) > 15*time.Second {
+		return map[int64]UserRate{}
+	}
 	return maps.Clone(s.rates)
 }

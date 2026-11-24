@@ -84,7 +84,9 @@ if [[ -n ${NODE_JOIN:-} || -f /var/lib/panel/agent.json ]]; then
   fi
   echo "==> restart"
   systemctl daemon-reload
-  systemctl enable panel-agent >/dev/null 2>&1
+  systemctl enable panel-agent panel-net panel-update.path >/dev/null 2>&1
+  systemctl restart panel-net
+  systemctl start panel-update.path
   systemctl restart panel-agent
   sleep 2
   systemctl --no-pager --lines=5 status panel-agent || true

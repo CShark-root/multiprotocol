@@ -188,3 +188,13 @@ func (s *server) restartNode(w http.ResponseWriter, r *http.Request) {
 	s.Nodes.Command(id, nodeproto.CmdRestartCores)
 	w.WriteHeader(http.StatusAccepted)
 }
+
+func (s *server) updateNodeAgent(w http.ResponseWriter, r *http.Request) {
+	id, ok := nodeID(r)
+	if !ok || s.Nodes == nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such server")
+		return
+	}
+	s.Nodes.Command(id, nodeproto.CmdUpdateAgent)
+	w.WriteHeader(http.StatusAccepted)
+}

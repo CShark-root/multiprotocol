@@ -107,6 +107,7 @@ func New(d Deps) http.Handler {
 				r.Delete("/nodes/{id}", s.deleteNode)
 				r.Post("/nodes/{id}/token", s.nodeToken)
 				r.Post("/nodes/{id}/restart", s.restartNode)
+				r.Post("/nodes/{id}/update", s.updateNodeAgent)
 				r.Put("/nodes/{id}/billing", s.saveNodeBilling)
 				r.Get("/system/billing", s.mainBilling)
 				r.Put("/system/billing", s.saveMainBilling)

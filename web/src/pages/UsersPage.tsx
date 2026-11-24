@@ -29,7 +29,7 @@ export function UsersPage() {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list })
-  const online = useQuery({ queryKey: ['online'], queryFn: api.online, refetchInterval: 10_000 })
+  const online = useQuery({ queryKey: ['online'], queryFn: api.online, refetchInterval: 5_000 })
   const onlineBy = useMemo(() => new Map((online.data ?? []).map((o) => [o.userId, o])), [online.data])
   const [details, setDetails] = useState<User | null>(null)
   const [query, setQuery] = useState('')

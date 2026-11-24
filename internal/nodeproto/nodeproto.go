@@ -44,4 +44,5 @@ type SyncResponse struct {
 // Команды узлу.
 const (
 	CmdRestartCores = "restart-cores"
+	CmdUpdateAgent  = "update-agent"
 )

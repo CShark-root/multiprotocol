@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CreditCard, Info, KeyRound, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { ArrowUpCircle, CreditCard, Info, KeyRound, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { ApiError, api, extras, type ServerBilling, type ServerNode, type SystemInfo } from '@/lib/api'
 import { formatBitrate, formatBytes, formatDuration, loadPercent } from '@/lib/utils'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader } from '@/components/ui'
@@ -132,6 +132,7 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const restart = useMutation({ mutationFn: () => api.nodes.restart(n.id) })
+  const update = useMutation({ mutationFn: () => api.nodes.updateAgent(n.id) })
   const token = useMutation({
     mutationFn: () => api.nodes.token(n.id),
     onSuccess: (d) => {
@@ -140,6 +141,7 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
     },
   })
   const [askToken, setAskToken] = useState(false)
+  const [askUpdate, setAskUpdate] = useState(false)
   const seen = n.lastSeen && !n.lastSeen.startsWith('0001') ? new Date(n.lastSeen) : null
   const status = !seen ? (
     <Badge tone="warning">{t('servers.waiting')}</Badge>
@@ -172,6 +174,17 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           </div>
         </Dialog>
       )}
+      {askUpdate && (
+        <Dialog open onClose={() => setAskUpdate(false)} title={t('servers.updateTitle', { name: n.name })}>
+          <div className="space-y-4">
+            <p className="text-sm">{t('servers.updateText')}</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setAskUpdate(false)}>{t('common.cancel')}</Button>
+              <Button disabled={update.isPending} onClick={() => { setAskUpdate(false); update.mutate() }}>{t('servers.updateConfirm')}</Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -186,6 +199,9 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           </div>
         </div>
         <div className="flex">
+          <Button size="icon" variant="ghost" aria-label={t('servers.updateAgent')} title={t('servers.updateAgent')} disabled={!n.online || update.isPending} onClick={() => setAskUpdate(true)}>
+            <ArrowUpCircle className="h-4 w-4" />
+          </Button>
           <Button size="icon" variant="ghost" aria-label={t('servers.restart')} title={t('servers.restart')} disabled={!n.online || restart.isPending} onClick={() => restart.mutate()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -200,6 +216,8 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           </Button>
         </div>
       </div>
+      {update.isSuccess && <p className="mt-3 text-xs text-muted-foreground">{t('servers.updateSent')}</p>}
+      {update.isError && <p className="mt-3 text-xs text-destructive">{t('common.error')}</p>}
       {n.applyError && <p className="mt-3 rounded-xl bg-destructive-soft px-3 py-2 text-xs text-destructive">{n.applyError}</p>}
       {n.health && n.online ? (
         <Facts h={n.health} />
