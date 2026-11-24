@@ -981,6 +981,7 @@ export const en: Messages = {
     uptime: 'Uptime',
     restart: 'Restart cores',
     updateAgent: 'Update agent',
+    updateNotRequired: 'No update is required: the agent version is the same as or newer than the panel version.',
     updateTitle: 'Update the agent on “{{name}}”?',
     updateText: 'The latest panel and service components will be installed. The agent will restart and briefly disconnect. Agents older than v0.1.50 must first be updated once with the regular install command.',
     updateConfirm: 'Update',

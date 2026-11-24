@@ -112,7 +112,9 @@ func missingQdiscOutput(out string) bool {
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Command failed -:") ||
-			line == "Error: Invalid handle." || line == "Error: No such file or directory." {
+			line == "Error: Invalid handle." || line == "Error: No such file or directory." ||
+			line == "Error: Cannot find specified qdisc on specified device." ||
+			line == "Error: Cannot delete qdisc with handle of zero." {
 			continue
 		}
 		return false

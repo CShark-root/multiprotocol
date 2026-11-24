@@ -41,6 +41,7 @@ export function ServersPage() {
           <NodeCard
             key={n.id}
             n={n}
+            panelVersion={system.data?.version}
             onEdit={() => setEditing(n)}
             onRemove={() => setRemoving(n)}
             onToken={(command) => setCommand({ name: n.name, command })}
@@ -128,7 +129,19 @@ function ThisServer({ system }: { system?: SystemInfo }) {
   )
 }
 
-function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () => void; onRemove: () => void; onToken: (cmd: string) => void }) {
+function versionAtLeast(current: string, reference: string) {
+  const parse = (value: string) => value.trim().match(/^\d+(?:\.\d+)*/)?.[0].split('.').map(Number)
+  const a = parse(current.replace(/^v/i, ''))
+  const b = parse(reference.replace(/^v/i, ''))
+  if (!a || !b) return false
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] ?? 0) - (b[i] ?? 0)
+    if (diff !== 0) return diff > 0
+  }
+  return true
+}
+
+function NodeCard({ n, panelVersion, onEdit, onRemove, onToken }: { n: ServerNode; panelVersion?: string; onEdit: () => void; onRemove: () => void; onToken: (cmd: string) => void }) {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const restart = useMutation({ mutationFn: () => api.nodes.restart(n.id) })
@@ -142,6 +155,7 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
   })
   const [askToken, setAskToken] = useState(false)
   const [askUpdate, setAskUpdate] = useState(false)
+  const [updateNotRequired, setUpdateNotRequired] = useState(false)
   const seen = n.lastSeen && !n.lastSeen.startsWith('0001') ? new Date(n.lastSeen) : null
   const status = !seen ? (
     <Badge tone="warning">{t('servers.waiting')}</Badge>
@@ -174,6 +188,14 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           </div>
         </Dialog>
       )}
+      {updateNotRequired && (
+        <Dialog open onClose={() => setUpdateNotRequired(false)} title={t('servers.updateAgent')}>
+          <div className="space-y-4">
+            <p className="text-sm">{t('servers.updateNotRequired')}</p>
+            <div className="flex justify-end"><Button onClick={() => setUpdateNotRequired(false)}>OK</Button></div>
+          </div>
+        </Dialog>
+      )}
       {askUpdate && (
         <Dialog open onClose={() => setAskUpdate(false)} title={t('servers.updateTitle', { name: n.name })}>
           <div className="space-y-4">
@@ -199,7 +221,18 @@ function NodeCard({ n, onEdit, onRemove, onToken }: { n: ServerNode; onEdit: () 
           </div>
         </div>
         <div className="flex">
-          <Button size="icon" variant="ghost" aria-label={t('servers.updateAgent')} title={t('servers.updateAgent')} disabled={!n.online || update.isPending} onClick={() => setAskUpdate(true)}>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={t('servers.updateAgent')}
+            title={t('servers.updateAgent')}
+            disabled={!n.online || update.isPending}
+            onClick={() => {
+              update.reset()
+              if (panelVersion && versionAtLeast(n.agentVersion ?? '', panelVersion)) setUpdateNotRequired(true)
+              else setAskUpdate(true)
+            }}
+          >
             <ArrowUpCircle className="h-4 w-4" />
           </Button>
           <Button size="icon" variant="ghost" aria-label={t('servers.restart')} title={t('servers.restart')} disabled={!n.online || restart.isPending} onClick={() => restart.mutate()}>

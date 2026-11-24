@@ -24,7 +24,12 @@ func TestSpeedLimitRuleset(t *testing.T) {
 }
 
 func TestMissingQdiscOutput(t *testing.T) {
-	for _, out := range []string{"", "Error: Invalid handle.\nCommand failed -:1", "Error: No such file or directory.\nCommand failed -:2"} {
+	for _, out := range []string{
+		"",
+		"Error: Invalid handle.\nCommand failed -:1",
+		"Error: No such file or directory.\nCommand failed -:2",
+		"Error: Cannot find specified qdisc on specified device.\nCommand failed -:1\nError: Cannot delete qdisc with handle of zero.\nCommand failed -:2",
+	} {
 		if !missingQdiscOutput(out) {
 			t.Errorf("must tolerate %q", out)
 		}
